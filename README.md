@@ -3,7 +3,7 @@
 I built Pulse Terminal for my own personal use. I just wanted a clean, focused way to watch the quick `1s` crypto market info without having to manage a hundred different tabs. It hooks straight into Binance's WebSockets and REST APIs to provide real-time data in a single, lightweight view.
 
 ![Vercel](https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)
-![Live](https://img.shields.io/badge/Live-TBD-green?style=for-the-badge)
+![Live](https://img.shields.io/badge/Live-green?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 ![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge)
 
@@ -13,7 +13,7 @@ I built Pulse Terminal for my own personal use. I just wanted a clean, focused w
 | :-----------------------------------: | :---------------------------------: |
 | ![Light Mode](./screenshot-light.png) | ![Dark Mode](./screenshot-dark.png) |
 
-## [Live Demo ](TBD)
+## [Live Demo ](https://pulse-terminal.vercel.app)
 
 ## Key Features
 
