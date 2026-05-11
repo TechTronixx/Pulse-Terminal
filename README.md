@@ -29,7 +29,7 @@ I built Pulse Terminal for my own personal use. I just wanted a clean, focused w
 - **Icons**: Iconify Framework.
 - **API**: Binance Public WebSocket & REST API.
 
-## Local Development
+## Install Steps
 
 Simply open `Terminal-main.html` in any modern browser. No build steps required.
 
