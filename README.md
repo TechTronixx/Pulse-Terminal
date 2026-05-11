@@ -1,4 +1,4 @@
-# Pulse Terminal: Crypto Trading Interface
+# Pulse Terminal: Crypto chart Interface
 
 I built Pulse Terminal for my own personal use. I just wanted a clean, focused way to watch the quick `1s` crypto market info without having to manage a hundred different tabs. It hooks straight into Binance's WebSockets and REST APIs to provide real-time data in a single, lightweight view.
 
