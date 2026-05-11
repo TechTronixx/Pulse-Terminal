@@ -12,6 +12,7 @@
       content="crypto, terminal, trading, binance, charts, real-time, orderbook, technical analysis"
     />
     <title>Pulse Terminal</title>
+    <link rel="icon" href="data:," />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Sans:wght@500;600;700&display=swap"
       rel="stylesheet"
@@ -1475,6 +1476,7 @@
           btn.innerHTML = `<span class="iconify" data-icon="${icon}" style="font-size:16px;"></span> ${pair}`;
           btn.onclick = () => switchPair(pair);
           container.appendChild(btn);
+        });
       }
       function destroyAllSeries() {
         [
