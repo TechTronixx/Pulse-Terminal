@@ -1052,21 +1052,326 @@
         pointer-events: none;
       }
 
+      /* ── Tablet Landscape ── */
+      @media (max-width: 1024px) {
+        .sidebar {
+          width: 300px;
+        }
+        .sidebar-section {
+          padding: var(--space-md);
+        }
+        .sidebar-title {
+          font-size: 16px;
+        }
+        .price-value {
+          font-size: 26px;
+        }
+        #liveInsightsPanel {
+          width: 280px;
+        }
+        .nav-pill-group {
+          max-width: 320px;
+        }
+      }
+
+      /* ── Tablet Portrait & Large Phones ── */
       @media (max-width: 768px) {
         .toolbar.floating-nav {
           width: 100%;
           border-radius: 0;
           top: 0;
+          position: fixed;
+          cursor: default;
         }
-        .main-container {
-          padding-top: 102px;
+        .toolbar.floating-nav:active {
+          cursor: default;
+        }
+        .drag-handle {
+          display: none;
+        }
+        .nav-row-primary {
+          height: 44px;
+          padding: 0 10px;
+          gap: 8px;
         }
         .nav-row-secondary {
+          height: 42px;
           overflow-x: auto;
           scrollbar-width: none;
+          -webkit-overflow-scrolling: touch;
+          padding: 0 10px;
+          gap: 4px;
         }
         .nav-row-secondary::-webkit-scrollbar {
           display: none;
+        }
+
+        .main-container {
+          flex-direction: column;
+          padding-top: 90px;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .chart-container {
+          flex: none;
+          height: 55vh;
+          min-height: 300px;
+        }
+
+        .sidebar {
+          width: 100%;
+          border-left: none;
+          border-top: 1px solid var(--hairline);
+          overflow-y: visible;
+          flex-shrink: 0;
+        }
+        .sidebar-section {
+          padding: var(--space-md);
+        }
+
+        .price-value {
+          font-size: 28px;
+        }
+        .price-widget {
+          margin-bottom: var(--space-sm);
+          padding: var(--space-sm) var(--space-md);
+        }
+
+        .stats-grid {
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 6px;
+        }
+
+        .search-container input {
+          width: 70px;
+        }
+        .search-container kbd {
+          display: none;
+        }
+
+        .nav-pill-group {
+          max-width: none;
+        }
+        .pair-btn {
+          padding: 4px 8px;
+          font-size: 12px;
+          height: 30px;
+          gap: 4px;
+        }
+        .pair-btn .iconify {
+          font-size: 14px !important;
+        }
+
+        .btn {
+          padding: 5px 10px;
+          font-size: 12px;
+          height: 30px;
+        }
+        .clean-dropdown-toggle {
+          padding: 5px 10px;
+          font-size: 12px;
+          height: 30px;
+        }
+
+        #liveInsightsPanel {
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          width: 100%;
+          max-height: 60vh;
+          border-radius: 14px 14px 0 0;
+          border-bottom: none;
+        }
+        .li-feed {
+          max-height: 50vh;
+        }
+
+        .readout {
+          top: auto;
+          bottom: var(--space-md);
+          right: var(--space-sm);
+          left: var(--space-sm);
+          font-size: 11px;
+          min-width: unset;
+        }
+
+        .ghost-watermark {
+          font-size: 25vw;
+        }
+
+        .divider {
+          height: 16px;
+          margin: 0 4px;
+        }
+
+        .tooltip::after {
+          display: none;
+        }
+      }
+
+      /* ── Phone ── */
+      @media (max-width: 480px) {
+        .nav-row-primary {
+          height: 40px;
+          padding: 0 8px;
+          gap: 6px;
+        }
+        .nav-row-secondary {
+          height: 38px;
+          padding: 0 8px;
+        }
+
+        .main-container {
+          padding-top: 82px;
+        }
+
+        .chart-container {
+          height: 45vh;
+          min-height: 260px;
+        }
+
+        .search-container {
+          height: 28px;
+          padding: 0 6px;
+        }
+        .search-container input {
+          width: 56px;
+          font-size: 12px;
+        }
+
+        .pair-btn {
+          padding: 3px 6px;
+          font-size: 11px;
+          height: 28px;
+        }
+        .btn {
+          padding: 4px 8px;
+          font-size: 11px;
+          height: 28px;
+          gap: 4px;
+        }
+        .clean-dropdown-toggle {
+          padding: 4px 8px;
+          font-size: 11px;
+          height: 28px;
+          gap: 4px;
+        }
+
+        /* Hide labels on phone, keep icons */
+        #activeChartTypeText,
+        #activeTimeframeText {
+          display: none;
+        }
+        .nav-row-secondary > span[style*="text-transform"] {
+          display: none;
+        }
+
+        .sidebar-section {
+          padding: var(--space-sm) var(--space-md);
+        }
+        .sidebar-title {
+          font-size: 15px;
+          margin-bottom: var(--space-sm);
+        }
+
+        .price-value {
+          font-size: 24px;
+          letter-spacing: -0.5px;
+        }
+        .price-change {
+          font-size: 12px;
+        }
+        .price-label {
+          font-size: 10px;
+        }
+
+        .stats-grid {
+          grid-template-columns: 1fr 1fr;
+          gap: 4px;
+        }
+        .stat-item {
+          padding: 8px 10px;
+        }
+        .stat-label {
+          font-size: 9px;
+        }
+        .stat-value {
+          font-size: 12px;
+        }
+
+        .signal-row {
+          padding: 8px 0;
+        }
+        .signal-name {
+          font-size: 13px;
+        }
+        .signal-desc {
+          font-size: 11px;
+        }
+        .badge {
+          font-size: 11px;
+          padding: 3px 6px;
+          min-width: 50px;
+        }
+
+        .ob-row {
+          padding: 3px 6px;
+        }
+        .ob-header {
+          padding: 4px 6px;
+          font-size: 9px;
+        }
+        .ob-mid-price {
+          font-size: 18px;
+        }
+
+        .chart-actions {
+          bottom: 34px;
+          right: 8px;
+        }
+        .chart-action-btn {
+          width: 24px;
+          height: 24px;
+          font-size: 12px;
+        }
+
+        #liveInsightsPanel {
+          max-height: 70vh;
+          border-radius: 12px 12px 0 0;
+        }
+        .li-card {
+          margin: 4px 10px;
+          padding: 10px 12px 8px;
+        }
+        .li-card-text {
+          font-size: 12px;
+        }
+
+        #clock {
+          display: none;
+        }
+      }
+
+      /* ── Shared touch & overscroll polish ── */
+      @media (hover: none) and (pointer: coarse) {
+        .pair-btn,
+        .btn,
+        .clean-dropdown-toggle,
+        .chart-action-btn,
+        .li-close-btn {
+          min-height: 36px;
+          min-width: 36px;
+        }
+        .ob-row {
+          padding: 6px 8px;
+        }
+        .toolbar.floating-nav {
+          cursor: default;
+        }
+        .toolbar.floating-nav:active {
+          cursor: default;
         }
       }
     </style>
@@ -2292,45 +2597,48 @@
       let isDragging = false,
         offsetX,
         offsetY;
-      toolbar.addEventListener("mousedown", (e) => {
-        if (
-          e.target.closest(
-            "button, input, .clean-dropdown, .pair-btn, .search-container",
+      const isTouchDevice = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+      if (!isTouchDevice) {
+        toolbar.addEventListener("mousedown", (e) => {
+          if (
+            e.target.closest(
+              "button, input, .clean-dropdown, .pair-btn, .search-container",
+            )
           )
-        )
-          return;
-        isDragging = true;
-        const rect = toolbar.getBoundingClientRect();
-        offsetX = e.clientX - rect.left;
-        offsetY = e.clientY - rect.top;
-        toolbar.style.cursor = "grabbing";
-        if (!toolbar.style.left || toolbar.style.left.includes("%")) {
-          toolbar.style.left = rect.left + "px";
-          toolbar.style.top = rect.top + "px";
-          toolbar.style.transform = "none";
-        }
-      });
-      document.addEventListener("mousemove", (e) => {
-        if (!isDragging) return;
-        const w = toolbar.offsetWidth;
-        const h = toolbar.offsetHeight;
-        const newLeft = Math.max(
-          0,
-          Math.min(e.clientX - offsetX, window.innerWidth - w),
-        );
-        const newTop = Math.max(
-          0,
-          Math.min(e.clientY - offsetY, window.innerHeight - h),
-        );
-        toolbar.style.left = newLeft + "px";
-        toolbar.style.top = newTop + "px";
-      });
-      document.addEventListener("mouseup", () => {
-        if (isDragging) {
-          isDragging = false;
-          toolbar.style.cursor = "grab";
-        }
-      });
+            return;
+          isDragging = true;
+          const rect = toolbar.getBoundingClientRect();
+          offsetX = e.clientX - rect.left;
+          offsetY = e.clientY - rect.top;
+          toolbar.style.cursor = "grabbing";
+          if (!toolbar.style.left || toolbar.style.left.includes("%")) {
+            toolbar.style.left = rect.left + "px";
+            toolbar.style.top = rect.top + "px";
+            toolbar.style.transform = "none";
+          }
+        });
+        document.addEventListener("mousemove", (e) => {
+          if (!isDragging) return;
+          const w = toolbar.offsetWidth;
+          const h = toolbar.offsetHeight;
+          const newLeft = Math.max(
+            0,
+            Math.min(e.clientX - offsetX, window.innerWidth - w),
+          );
+          const newTop = Math.max(
+            0,
+            Math.min(e.clientY - offsetY, window.innerHeight - h),
+          );
+          toolbar.style.left = newLeft + "px";
+          toolbar.style.top = newTop + "px";
+        });
+        document.addEventListener("mouseup", () => {
+          if (isDragging) {
+            isDragging = false;
+            toolbar.style.cursor = "grab";
+          }
+        });
+      }
 
       function updateClock() {
         document.getElementById("clock").textContent =
