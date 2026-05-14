@@ -774,7 +774,7 @@ body {
   position: fixed;
   bottom: 24px;
   left: 24px;
-  width: 300px;
+  width: 560px;
   background: var(--surface-card);
   border: 1px solid var(--hairline);
   border-radius: 10px;
@@ -848,9 +848,11 @@ body {
   background: var(--surface-strong);
 }
 .li-feed {
-  overflow-y: auto;
-  max-height: 480px;
-  padding: 10px 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 16px;
+  overflow: hidden;
 }
 .li-feed::-webkit-scrollbar {
   width: 4px;
@@ -863,14 +865,17 @@ body {
   border-radius: 2px;
 }
 .li-card {
-  margin: 6px 12px;
+  break-inside: avoid;
   background: var(--canvas);
   border: 1px solid var(--hairline);
-  border-radius: 8px;
-  padding: 14px 14px 12px;
+  border-radius: 10px;
+  padding: 16px;
   transition:
     border-color 0.2s,
     box-shadow 0.2s;
+}
+.li-card.ai-card {
+  grid-column: 1 / -1;
 }
 .li-card:hover {
   border-color: var(--hairline-soft);
@@ -887,13 +892,13 @@ body {
   font-family: var(--font-ui);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .li-card-label::before {
   content: "";
   display: inline-block;
-  width: 3px;
-  height: 10px;
+  width: 4px;
+  height: 12px;
   border-radius: 2px;
   background: var(--muted);
   flex-shrink: 0;
@@ -907,6 +912,12 @@ body {
 }
 .li-card-label.whale::before {
   background: #9ca3af;
+}
+.li-card-label.macd::before {
+  background: #3b82f6; /* blue */
+}
+.li-card-label.bb::before {
+  background: #8b5cf6; /* purple */
 }
 /* orderbook mini bar chart */
 .li-ob-bars {
@@ -956,22 +967,24 @@ body {
 .li-card-text {
   font-size: 13px;
   color: var(--body);
-  line-height: 1.55;
+  line-height: 1.6;
   font-weight: 500;
   font-family: var(--font-ui);
+  margin-bottom: 12px;
 }
 .li-card-text.muted {
   color: var(--muted);
 }
 .li-card-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
   font-size: 11px;
   color: var(--muted);
   font-weight: 500;
   font-family: var(--font-num);
+  line-height: 1.4;
 }
 .li-card-meta .li-tag {
   padding: 2px 6px;

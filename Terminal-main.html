@@ -324,36 +324,44 @@
           <span class="iconify" data-icon="tabler:x"></span>
         </button>
       </div>
-      <div class="li-feed" id="liFeed">
-        <div class="li-card" id="li-card-ob">
-          <div class="li-card-label">Market Pressure</div>
-          <div class="li-ob-bars" id="liObBars"></div>
-          <div class="li-card-text" id="liObText">
-            Waiting for depth data...
+      <div class="li-feed" id="liFeed" style="display: block; padding: 16px;">
+        <div class="li-card ai-card" style="margin-bottom: 0;">
+          <div class="li-card-label" style="color: var(--binance-yellow); margin-bottom: 12px;">
+            <span class="iconify" data-icon="tabler:cpu" style="font-size: 14px; margin-right: 4px;"></span>
+            AI Trading Analysis
           </div>
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--ink);" id="aiBias"><span class="iconify" data-icon="tabler:target" style="margin-right: 4px; vertical-align: text-bottom;"></span>Bias: NEUTRAL</div>
+          <div style="font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--muted);" id="aiRisk"><span class="iconify" data-icon="tabler:alert-triangle" style="margin-right: 4px; vertical-align: text-bottom;"></span>Risk Level: Medium (Confidence: 0%)</div>
+          <div style="font-size: 13px; color: var(--body); line-height: 1.6; margin-bottom: 16px;" id="aiReason"><span class="iconify" data-icon="tabler:bulb" style="margin-right: 4px; vertical-align: text-bottom;"></span>Reason: Analyzing data...</div>
+          <div style="font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 8px;"><span class="iconify" data-icon="tabler:bolt" style="margin-right: 4px; vertical-align: text-bottom;"></span>Key Levels:</div>
+          <div style="display: flex; gap: 12px; font-family: var(--font-num); font-size: 12px;">
+            <div style="flex: 1; padding: 8px; background: var(--surface-strong); border-radius: 6px;">
+              <div style="color: var(--muted); font-size: 10px; text-transform: uppercase;">Entry Zone</div>
+              <div id="aiEntry" style="color: var(--ink); font-weight: 600;">0.00</div>
+            </div>
+            <div style="flex: 1; padding: 8px; background: rgba(246, 70, 93, 0.1); border-radius: 6px;">
+              <div style="color: var(--trading-down); font-size: 10px; text-transform: uppercase;">Invalidation</div>
+              <div id="aiStop" style="color: var(--trading-down); font-weight: 600;">0.00</div>
+            </div>
+            <div style="flex: 1; padding: 8px; background: rgba(14, 203, 129, 0.1); border-radius: 6px;">
+              <div style="color: var(--trading-up); font-size: 10px; text-transform: uppercase;">Take Profit</div>
+              <div id="aiTarget" style="color: var(--trading-up); font-weight: 600;">0.00</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="li-card" id="li-card-ob">
+          <div class="li-card-label">Orderbook (Buyers vs Sellers)</div>
+          <div class="li-ob-bars" id="liObBars"></div>
+          <div class="li-card-text" id="liObText">Waiting for depth data...</div>
           <div class="li-card-meta">
             <span class="li-tag">DEPTH</span>
             <span id="liObMeta">&ndash;</span>
           </div>
         </div>
 
-        <div class="li-card" id="li-card-mom">
-          <div class="li-card-label momentum">Price Bias</div>
-          <canvas
-            class="li-spark"
-            id="liSparkCanvas"
-            width="200"
-            height="36"
-          ></canvas>
-          <div class="li-card-text" id="liMomText">Awaiting stream...</div>
-          <div class="li-card-meta">
-            <span class="li-tag" id="liMomTf">&ndash;</span>
-            <span id="liMomMeta">&ndash;</span>
-          </div>
-        </div>
-
         <div class="li-card" id="li-card-whale">
-          <div class="li-card-label whale">Volume Context</div>
+          <div class="li-card-label whale">Trading Activity</div>
           <div class="li-vol-bar-wrap">
             <div class="li-vol-bar" id="liVolBar"></div>
           </div>
@@ -361,6 +369,24 @@
           <div class="li-card-meta">
             <span class="li-tag" id="liWhaleTf">20-bar avg</span>
             <span id="liWhaleMeta">&ndash;</span>
+          </div>
+        </div>
+
+        <div class="li-card" id="li-card-macd">
+          <div class="li-card-label macd">Momentum (MACD)</div>
+          <div class="li-card-text" id="liMacdText">Waiting for data...</div>
+          <div class="li-card-meta">
+            <span class="li-tag" id="liMacdTf">12/26/9</span>
+            <span id="liMacdMeta">&ndash;</span>
+          </div>
+        </div>
+
+        <div class="li-card" id="li-card-bb">
+          <div class="li-card-label bb">Volatility (Bollinger)</div>
+          <div class="li-card-text" id="liBbText">Waiting for data...</div>
+          <div class="li-card-meta">
+            <span class="li-tag" id="liBbTf">20-bar, 2 SD</span>
+            <span id="liBbMeta">&ndash;</span>
           </div>
         </div>
       </div>

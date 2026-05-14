@@ -600,9 +600,110 @@ function updateSignals(candle, rsi, ema9, ema21, vwap) {
 }
 
 // -- websocket stream (binance kline) --
-function startStream() {
+async function startStream() {
   if (ws) return;
   const symbol = currentPair.toLowerCase() + "usdt";
+
+  const ema9State = { buf: [], val: null };
+  const ema21State = { buf: [], val: null };
+  let prevHaOpen = null,
+    prevHaClose = null;
+  const closes = [];
+
+  try {
+    const histRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${currentPair}USDT&interval=${currentTimeframe}&limit=100`);
+    if (histRes.ok) {
+      const histData = await histRes.json();
+      
+      const chartPoints = [];
+      const volPoints = [];
+      const vwapPoints = [];
+      const ema9Points = [];
+      const ema21Points = [];
+      const rsiPoints = [];
+
+      histData.forEach(k => {
+        const candle = {
+          time: Math.floor(k[0] / 1000),
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        };
+
+        closes.push(candle.close);
+        if (closes.length > 100) closes.shift();
+
+        const vwap = updateVWAP(candle, currentPair);
+        const rsi = updateRSI(closes, currentPair);
+        const ema9 = calcEMAIncr(ema9State, candle.close, 9);
+        const ema21 = calcEMAIncr(ema21State, candle.close, 21);
+
+        const data = {
+          ...candle,
+          vwap,
+          rsi: rsi !== null ? rsi.toFixed(2) : null,
+          ema9: ema9 !== null ? ema9.toFixed(2) : null,
+          ema21: ema21 !== null ? ema21.toFixed(2) : null,
+        };
+
+        candles[currentPair].push(data);
+        if (candles[currentPair].length > MAX_CANDLES)
+          candles[currentPair].shift();
+
+        let pointToUpdate;
+        if (chartType === "heikinAshi") {
+          const haClose = (candle.open + candle.high + candle.low + candle.close) / 4;
+          const haOpen = prevHaOpen !== null ? (prevHaOpen + prevHaClose) / 2 : (candle.open + candle.close) / 2;
+          const haHigh = Math.max(candle.high, haOpen, haClose);
+          const haLow = Math.min(candle.low, haOpen, haClose);
+          prevHaOpen = haOpen;
+          prevHaClose = haClose;
+          pointToUpdate = { time: candle.time, open: haOpen, high: haHigh, low: haLow, close: haClose };
+        } else if (chartType === "line") {
+          pointToUpdate = { time: candle.time, value: candle.close };
+        } else {
+          pointToUpdate = candle;
+        }
+        chartPoints.push(pointToUpdate);
+        
+        volPoints.push({ time: candle.time, value: candle.volume, color: candle.close >= candle.open ? "#0ecb8180" : "#f6465d80" });
+        if (vwap !== null) vwapPoints.push({ time: candle.time, value: vwap });
+        if (ema9 !== null) ema9Points.push({ time: candle.time, value: ema9 });
+        if (ema21 !== null) ema21Points.push({ time: candle.time, value: ema21 });
+        if (rsi !== null) rsiPoints.push({ time: candle.time, value: rsi });
+        
+        insightsVolWindow.push(candle.volume);
+        if (insightsVolWindow.length > INSIGHTS_VOL_WINDOW) insightsVolWindow.shift();
+      });
+
+      if (mainSeries && chartPoints.length) mainSeries.setData(chartPoints);
+      if (volumeSeries && volPoints.length) volumeSeries.setData(volPoints);
+      if (vwapSeries && vwapPoints.length) vwapSeries.setData(vwapPoints);
+      if (ema9Series && ema9Points.length) ema9Series.setData(ema9Points);
+      if (ema21Series && ema21Points.length) ema21Series.setData(ema21Points);
+      if (rsiSeries && rsiPoints.length) rsiSeries.setData(rsiPoints);
+      
+      chart.timeScale().fitContent();
+
+      if (candles[currentPair].length) {
+        const lastCandle = candles[currentPair][candles[currentPair].length - 1];
+        updateLivePrice(lastCandle);
+        updateSignals(lastCandle, parseFloat(lastCandle.rsi), parseFloat(lastCandle.ema9), parseFloat(lastCandle.ema21), lastCandle.vwap);
+        updateAITradingAnalysis(lastCandle, lastCandle.vwap, closes);
+        updateInsightsWhale(lastCandle);
+        updateInsightsMACD(closes);
+        updateInsightsBB(lastCandle.close, closes);
+      }
+      
+      const overlay = document.getElementById("streamOverlay");
+      if (overlay) overlay.classList.add("hidden");
+    }
+  } catch (e) {
+    console.error("Failed to fetch history", e);
+  }
+
   try {
     ws = new WebSocket(
       "wss://stream.binance.com:9443/ws/" +
@@ -614,12 +715,6 @@ function startStream() {
     console.error("[WebSocket] Failed to open connection.", e);
     return;
   }
-
-  const ema9State = { buf: [], val: null };
-  const ema21State = { buf: [], val: null };
-  let prevHaOpen = null,
-    prevHaClose = null;
-  const closes = [];
 
   ws.onopen = () => {
     isSwitching = false;
@@ -644,7 +739,7 @@ function startStream() {
       overlay.classList.add("hidden");
 
     closes.push(candle.close);
-    if (closes.length > 50) closes.shift();
+    if (closes.length > 100) closes.shift();
 
     const vwap = updateVWAP(candle, currentPair);
     const rsi = updateRSI(closes, currentPair);
@@ -717,8 +812,10 @@ function startStream() {
 
     updateLivePrice(candle);
     updateSignals(candle, rsi, ema9, ema21, vwap);
-    updateInsightsMomentum(candle, vwap, closes);
+    updateAITradingAnalysis(candle, vwap, closes);
     updateInsightsWhale(candle);
+    updateInsightsMACD(closes);
+    updateInsightsBB(candle.close, closes);
   };
 
   ws.onclose = () => {
@@ -947,130 +1044,118 @@ function updateClock() {
 const insightsVolWindow = [];
 const INSIGHTS_VOL_WINDOW = 20;
 
-// draws a mini price sparkline on the insights panel canvas
-function drawSparkline(closes) {
-  const canvas = document.getElementById("liSparkCanvas");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const w = canvas.offsetWidth || 260;
-  const h = canvas.height;
-  canvas.width = w;
-  ctx.clearRect(0, 0, w, h);
-  if (closes.length < 2) return;
 
-  const slice = closes.slice(-40);
-  const min = Math.min(...slice);
-  const max = Math.max(...slice);
-  const range = max - min || 1;
-  const isUp = slice[slice.length - 1] >= slice[0];
-
-  const grad = ctx.createLinearGradient(0, 0, w, 0);
-  if (isUp) {
-    grad.addColorStop(0, "rgba(14,203,129,0.3)");
-    grad.addColorStop(1, "#0ecb81");
-  } else {
-    grad.addColorStop(0, "rgba(246,70,93,0.3)");
-    grad.addColorStop(1, "#f6465d");
-  }
-  ctx.strokeStyle = grad;
-  ctx.lineWidth = 1.5;
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  slice.forEach((v, i) => {
-    const x = (i / (slice.length - 1)) * w;
-    const y = h - ((v - min) / range) * (h - 4) - 2;
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-}
-
-// price bias card: scores rsi + vwap + ema alignment into a verdict
-function updateInsightsMomentum(candle, vwap, closes) {
-  const text = document.getElementById("liMomText");
-  const meta = document.getElementById("liMomMeta");
-  const tf = document.getElementById("liMomTf");
-  if (tf) tf.textContent = currentTimeframe;
-
-  drawSparkline(closes);
-
-
-  if (closes.length < 14 || vwap === null) {
-    if (text) {
-      text.textContent = "Building signal history...";
-      text.style.color = "var(--muted)";
-    }
-    return;
-  }
-
+  // AI Trading Analysis
+function updateAITradingAnalysis(candle, vwap, closes) {
+  if (closes.length < 35 || vwap === null) return;
+  
   const price = candle.close;
   const rsiVal = parseFloat(candle.rsi);
   const ema9v = parseFloat(candle.ema9);
   const ema21v = parseFloat(candle.ema21);
 
-  // score each signal: +1 bullish, -1 bearish, 0 neutral
-  let score = 0;
-  const signals = [];
-
-
-  const vwapPct = ((price - vwap) / vwap) * 100;
-  if (vwapPct > 0.05) {
-    score++;
-    signals.push(`+${vwapPct.toFixed(2)}% VWAP`);
-  } else if (vwapPct < -0.05) {
-    score--;
-    signals.push(`${vwapPct.toFixed(2)}% VWAP`);
-  } else {
-    signals.push("At VWAP");
+  // MACD calc
+  const calcEMA = (data, period) => {
+    const k = 2 / (period + 1);
+    let ema = data[0];
+    for (let i = 1; i < data.length; i++) {
+      ema = data[i] * k + ema * (1 - k);
+    }
+    return ema;
+  };
+  const macdLineArr = [];
+  for (let i = closes.length - 20; i <= closes.length; i++) {
+    const slice = closes.slice(0, i);
+    const ema12 = calcEMA(slice.slice(-50), 12);
+    const ema26 = calcEMA(slice.slice(-50), 26);
+    macdLineArr.push(ema12 - ema26);
   }
+  const currentMacd = macdLineArr[macdLineArr.length - 1];
+  const signalLine = calcEMA(macdLineArr, 9);
+  const hist = currentMacd - signalLine;
+  const prevHist = macdLineArr[macdLineArr.length - 2] - calcEMA(macdLineArr.slice(0, -1), 9);
 
+  // BB calc
+  const bbSlice = closes.slice(-20);
+  const sma = bbSlice.reduce((a, b) => a + b, 0) / 20;
+  const squaredDiffs = bbSlice.map(val => Math.pow(val - sma, 2));
+  const stdDev = Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / 20);
+  const upper = sma + (stdDev * 2);
+  const lower = sma - (stdDev * 2);
+
+  // AI Logic
+  let score = 0;
+  let reasons = [];
+
+  if (price > vwap) { score += 20; reasons.push("Price > VWAP"); }
+  else { score -= 20; reasons.push("Price < VWAP"); }
 
   if (!isNaN(rsiVal)) {
-    if (rsiVal < 35) {
-      score++;
-      signals.push(`RSI ${rsiVal} oversold`);
-    } else if (rsiVal > 65) {
-      score--;
-      signals.push(`RSI ${rsiVal} overbought`);
-    } else {
-      signals.push(`RSI ${rsiVal.toFixed(0)} neutral`);
-    }
+    if (rsiVal < 40) { score += 20; reasons.push(`RSI Oversold`); }
+    else if (rsiVal > 60) { score -= 20; reasons.push(`RSI Overbought`); }
   }
-
 
   if (!isNaN(ema9v) && !isNaN(ema21v)) {
-    if (ema9v > ema21v) {
-      score++;
-      signals.push("EMA bullish cross");
-    } else {
-      score--;
-      signals.push("EMA bearish cross");
-    }
+    if (ema9v > ema21v) { score += 20; reasons.push("EMA Bull Cross"); }
+    else { score -= 20; reasons.push("EMA Bear Cross"); }
   }
 
+  if (hist > 0 && hist > prevHist) { score += 20; reasons.push("MACD Momentum Rising"); }
+  else if (hist < 0 && hist < prevHist) { score -= 20; reasons.push("MACD Momentum Falling"); }
 
-  let verdict, color;
-  if (score >= 2) {
-    verdict = "Bullish bias â€” multiple signals aligned upward.";
-    color = "var(--text-bullish)";
-  } else if (score === 1) {
-    verdict = "Mild bullish lean â€” watch for confirmation.";
-    color = "var(--text-bullish)";
-  } else if (score === -1) {
-    verdict = "Mild bearish lean â€” watch for breakdown.";
-    color = "var(--text-bearish)";
-  } else if (score <= -2) {
-    verdict = "Bearish bias â€” multiple signals aligned downward.";
-    color = "var(--text-bearish)";
-  } else {
-    verdict = "Mixed signals â€” market is ranging. Stand aside.";
+  if (price < lower) { score += 20; reasons.push("Price rejected Lower BB"); }
+  else if (price > upper) { score -= 20; reasons.push("Price rejected Upper BB"); }
+
+  let confidence = Math.abs(score);
+  let bias = "NEUTRAL";
+  let risk = "High";
+  
+  if (confidence >= 80) risk = "Low";
+  else if (confidence >= 60) risk = "Medium";
+  else risk = "High";
+
+  let color = "var(--text-neutral)";
+  if (score > 0) { bias = "LONG"; color = "var(--text-bullish)"; }
+  else if (score < 0) { bias = "SHORT"; color = "var(--text-bearish)"; }
+
+  let verdict = "Wait for better setup.";
+  if (confidence < 40) {
+    bias = "NO TRADE";
     color = "var(--text-neutral)";
+    verdict = "Conflicting signals. Waiting for clarity.";
+  } else {
+    verdict = `Aligned: ${reasons.slice(0,3).join(", ")}.`;
   }
 
-  if (text) {
-    text.textContent = verdict;
-    text.style.color = color;
+  // Key Levels
+  let entry = price.toFixed(2);
+  let stop = "0.00";
+  let target = "0.00";
+
+  if (bias === "LONG") {
+    stop = lower.toFixed(2);
+    target = (price + (price - lower) * 2).toFixed(2); // 1:2 RR
+  } else if (bias === "SHORT") {
+    stop = upper.toFixed(2);
+    target = (price - (upper - price) * 2).toFixed(2);
   }
-  if (meta) meta.textContent = signals.join(" Â· ");
+
+  const elBias = document.getElementById("aiBias");
+  const elRisk = document.getElementById("aiRisk");
+  const elReason = document.getElementById("aiReason");
+  const elEntry = document.getElementById("aiEntry");
+  const elStop = document.getElementById("aiStop");
+  const elTarget = document.getElementById("aiTarget");
+
+  if (elBias) {
+    elBias.innerHTML = `<span class="iconify" data-icon="tabler:target" style="margin-right: 4px; vertical-align: text-bottom;"></span>Bias: ${bias}`;
+    elBias.style.color = color;
+  }
+  if (elRisk) elRisk.innerHTML = `<span class="iconify" data-icon="tabler:alert-triangle" style="margin-right: 4px; vertical-align: text-bottom;"></span>Risk Level: ${risk} (Confidence: ${confidence}%)`;
+  if (elReason) elReason.innerHTML = `<span class="iconify" data-icon="tabler:bulb" style="margin-right: 4px; vertical-align: text-bottom;"></span>Reason: ${verdict}`;
+  if (elEntry) elEntry.textContent = entry;
+  if (elStop) elStop.textContent = stop;
+  if (elTarget) elTarget.textContent = target;
 }
 
 // volume context card: compares current bar volume to 20-bar rolling avg
@@ -1101,22 +1186,22 @@ function updateInsightsWhale(candle) {
 
   let verdict, color;
   if (isHigh && isUp) {
-    verdict = `High-conviction buying (${ratio.toFixed(1)}Ã— avg). Breakout likely.`;
+    verdict = `Lots of buyers jumping in (${ratio.toFixed(1)}x normal). Great for a quick buy!`;
     color = "var(--text-bullish)";
   } else if (isHigh) {
-    verdict = `High-volume selling (${ratio.toFixed(1)}Ã— avg). Distribution in progress.`;
+    verdict = `Lots of sellers dumping (${ratio.toFixed(1)}x normal). Expect a quick drop!`;
     color = "var(--text-bearish)";
   } else if (isMed && isUp) {
-    verdict = `Elevated buying interest (${ratio.toFixed(1)}Ã— avg). Momentum building.`;
+    verdict = `More buyers than usual (${ratio.toFixed(1)}x normal). Up trend starting.`;
     color = "var(--text-bullish)";
   } else if (isMed) {
-    verdict = `Elevated selling pressure (${ratio.toFixed(1)}Ã— avg). Monitor closely.`;
+    verdict = `More sellers than usual (${ratio.toFixed(1)}x normal). Down trend starting.`;
     color = "var(--text-bearish)";
   } else if (isLow) {
-    verdict = `Low volume (${ratio.toFixed(1)}Ã— avg). Likely range-bound â€” no edge.`;
+    verdict = `Very slow right now (${ratio.toFixed(1)}x normal). Bad time for quick trades.`;
     color = "var(--text-neutral)";
   } else {
-    verdict = `Normal volume (${ratio.toFixed(1)}Ã— avg). No unusual activity.`;
+    verdict = `Normal amount of trades (${ratio.toFixed(1)}x normal). Nothing crazy happening.`;
     color = "var(--body)";
   }
 
@@ -1124,7 +1209,7 @@ function updateInsightsWhale(candle) {
     text.textContent = verdict;
     text.style.color = color;
   }
-  if (meta) meta.textContent = `${ratio.toFixed(1)}Ã— 20-bar avg`;
+  if (meta) meta.textContent = `${ratio.toFixed(1)}x 20-bar avg`;
 }
 
 // orderbook pressure card: visualizes bid/ask imbalance
@@ -1166,14 +1251,118 @@ function updateInsightsOrderbook(bids, asks, maxTotal) {
   let label;
   if (imbalance > 0.2) {
     const price = side === "bid" ? bids[0][0] : asks[0][0];
-    label = `Massive ${side} wall detected at ${price.toLocaleString()}. ${side === "ask" ? "Ask liquidity thinning." : "Bid support building."}`;
+    label = `Huge wall of ${side === "bid" ? "buyers" : "sellers"} at ${price.toLocaleString()}. ${side === "ask" ? "Hard for price to go up." : "Strong floor, hard to drop."}`;
   } else {
-    label = "Order flow balanced. No significant walls detected.";
+    label = "Equal buyers and sellers. Market is flat right now.";
   }
 
   if (text) text.textContent = label;
   if (meta)
     meta.textContent = `High Imbalance | ${(bidPct * 100).toFixed(0)}% Bid vs ${(askPct * 100).toFixed(0)}% Ask`;
+}
+
+// MACD Momentum Card
+function updateInsightsMACD(closes) {
+  const text = document.getElementById("liMacdText");
+  const meta = document.getElementById("liMacdMeta");
+  if (!text) return;
+  if (closes.length < 35) {
+    text.textContent = "Gathering data...";
+    text.style.color = "var(--muted)";
+    return;
+  }
+
+  const calcEMA = (data, period) => {
+    const k = 2 / (period + 1);
+    let ema = data[0];
+    for (let i = 1; i < data.length; i++) {
+      ema = data[i] * k + ema * (1 - k);
+    }
+    return ema;
+  };
+
+  const macdLineArr = [];
+  for (let i = closes.length - 20; i <= closes.length; i++) {
+    const slice = closes.slice(0, i);
+    const ema12 = calcEMA(slice.slice(-50), 12);
+    const ema26 = calcEMA(slice.slice(-50), 26);
+    macdLineArr.push(ema12 - ema26);
+  }
+
+  const currentMacd = macdLineArr[macdLineArr.length - 1];
+  const signalLine = calcEMA(macdLineArr, 9);
+  const hist = currentMacd - signalLine;
+  const prevHist = macdLineArr[macdLineArr.length - 2] - calcEMA(macdLineArr.slice(0, -1), 9);
+
+  let verdict, color;
+  if (hist > 0 && hist > prevHist) {
+    verdict = "Strong uptrend! MACD is growing positive.";
+    color = "var(--text-bullish)";
+  } else if (hist > 0 && hist < prevHist) {
+    verdict = "Uptrend is slowing down. Be careful.";
+    color = "#f59e0b"; // yellow/amber
+  } else if (hist < 0 && hist < prevHist) {
+    verdict = "Strong downtrend! MACD is dropping fast.";
+    color = "var(--text-bearish)";
+  } else if (hist < 0 && hist > prevHist) {
+    verdict = "Downtrend is losing steam. Might bounce up.";
+    color = "#f59e0b";
+  }
+
+  if (text) {
+    text.textContent = verdict;
+    text.style.color = color;
+  }
+  if (meta) meta.textContent = `MACD: ${currentMacd.toFixed(2)} | Sig: ${signalLine.toFixed(2)}`;
+}
+
+// Bollinger Bands Volatility Card
+function updateInsightsBB(price, closes) {
+  const text = document.getElementById("liBbText");
+  const meta = document.getElementById("liBbMeta");
+  if (!text) return;
+  if (closes.length < 20) {
+    text.textContent = "Gathering data...";
+    text.style.color = "var(--muted)";
+    return;
+  }
+
+  const slice = closes.slice(-20);
+  const sma = slice.reduce((a, b) => a + b, 0) / 20;
+  
+  const squaredDiffs = slice.map(val => Math.pow(val - sma, 2));
+  const variance = squaredDiffs.reduce((a, b) => a + b, 0) / 20;
+  const stdDev = Math.sqrt(variance);
+
+  const upper = sma + (stdDev * 2);
+  const lower = sma - (stdDev * 2);
+
+  let verdict, color;
+  if (price > upper) {
+    verdict = "Price is above the upper band! Likely overbought, watch for a drop.";
+    color = "var(--text-bearish)";
+  } else if (price < lower) {
+    verdict = "Price dropped below the lower band! Oversold, good time to buy.";
+    color = "var(--text-bullish)";
+  } else if (price > sma) {
+    verdict = "Price is in the upper half. Looking steady.";
+    color = "var(--text-bullish)";
+  } else {
+    verdict = "Price is in the lower half. Slightly weak.";
+    color = "var(--text-bearish)";
+  }
+
+  const bandwidth = ((upper - lower) / sma) * 100;
+  if (bandwidth < 0.2) {
+    verdict = "Bollinger Squeeze! Market is very tight. Expect a big move soon.";
+    color = "#f59e0b";
+  }
+
+  if (text) {
+    text.textContent = verdict;
+    text.style.color = color;
+  }
+  if (meta) meta.textContent = `Upper: ${upper.toFixed(2)} | Lower: ${lower.toFixed(2)}`;
 }
 
 // -- boot --
