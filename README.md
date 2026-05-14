@@ -29,9 +29,24 @@ I built Pulse Terminal for my own personal use. I just wanted a clean, focused w
 - **Icons**: Iconify Framework.
 - **API**: Binance Public WebSocket & REST API.
 
-## Install Steps
+## Running Locally
 
-Simply open `Terminal-main.html` in any modern browser. No build steps required.
+No build tools or dependencies required.
+
+```
+git clone https://github.com/TechTronixx/Pulse-Terminal.git
+cd Pulse-Terminal
+```
+
+Open `Terminal-main.html` in any modern browser.
+
+Alternatively, run a local server:
+
+```
+npx -y serve .
+```
+
+Visit `http://localhost:3000` once the server starts.
 
 ---
 
