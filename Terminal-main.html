@@ -24,6 +24,7 @@
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <script src="https://code.iconify.design/3/3.1.0/iconify.min.js"></script>
     <style>
+      /* -- design tokens -- */
       :root {
         --canvas: #f0e0ce;
         --canvas-warm: #f3e8d8;
@@ -70,6 +71,7 @@
         --accent-subtle: rgba(252, 213, 53, 0.15);
       }
 
+      /* -- spacing, radii, fonts -- */
       :root {
         --binance-yellow: #fcd535;
         --trading-up: #0ecb81;
@@ -89,6 +91,7 @@
         --font-num: "Motiva Sans", "BinancePlex", "IBM Plex Sans", sans-serif;
       }
 
+      /* -- base reset -- */
       * {
         box-sizing: border-box;
         margin: 0;
@@ -115,6 +118,7 @@
         color: var(--trading-down);
       }
 
+      /* -- floating navbar -- */
       .toolbar.floating-nav {
         position: absolute;
         top: 12px;
@@ -170,7 +174,7 @@
         opacity: 0.5;
       }
 
-      /* Search Bar */
+      /* -- search bar -- */
       .search-container {
         display: flex;
         align-items: center;
@@ -211,7 +215,7 @@
         flex-shrink: 0;
       }
 
-      /* Token tab strip */
+      /* -- token tab strip -- */
       .nav-pill-group {
         display: flex;
         gap: 2px;
@@ -298,7 +302,7 @@
         border-color: var(--accent);
       }
 
-      /* Clean Dropdown */
+      /* -- dropdown menus -- */
       .clean-dropdown {
         position: relative;
         flex-shrink: 0;
@@ -372,7 +376,7 @@
         margin: 0 var(--space-xs);
       }
 
-      /* Tooltips */
+      /* -- tooltips -- */
       .tooltip {
         position: relative;
       }
@@ -411,19 +415,20 @@
         font-size: 18vw;
         font-weight: 700;
         color: var(--ink);
-        opacity: 0.02;
+        opacity: 0.03;
         pointer-events: none;
-        z-index: 1;
+        z-index: 5;
         white-space: nowrap;
         letter-spacing: -0.04em;
         font-family: var(--font-num);
       }
 
+      /* -- main layout -- */
       .main-container {
         display: flex;
         flex: 1;
         overflow: hidden;
-        padding-top: 102px; /* two-row nav height + top offset */
+        padding-top: 102px;
       }
 
       .chart-container {
@@ -442,7 +447,7 @@
         height: 100%;
       }
 
-      /* Chart overlay action buttons */
+      /* -- chart overlay controls -- */
       .chart-actions {
         position: absolute;
         bottom: 40px; /* above the time scale */
@@ -475,6 +480,7 @@
         box-shadow: var(--shadow-elevated);
       }
 
+      /* -- price widget -- */
       .price-widget {
         background: var(--surface-card);
         border: 1px solid var(--hairline);
@@ -540,6 +546,7 @@
         font-weight: 500;
       }
 
+      /* -- sidebar -- */
       .sidebar {
         width: 380px;
         background: var(--canvas-warm);
@@ -547,7 +554,6 @@
         display: flex;
         flex-direction: column;
         overflow-y: auto;
-        /* thin custom scrollbar */
         scrollbar-width: thin;
         scrollbar-color: var(--surface-strong) transparent;
       }
@@ -590,7 +596,7 @@
         box-shadow: var(--shadow-card);
       }
 
-      /* 24h Stats grid */
+      /* -- 24h stats grid -- */
       .stats-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -626,6 +632,7 @@
         color: var(--trading-down);
       }
 
+      /* -- technical signals -- */
       .signal-row {
         display: flex;
         justify-content: space-between;
@@ -656,6 +663,7 @@
         margin-top: 2px;
       }
 
+      /* -- signal badges -- */
       .badge {
         display: inline-flex;
         align-items: center;
@@ -683,38 +691,6 @@
         border: 1px solid var(--hairline);
       }
 
-      .sentiment-bar {
-        height: 4px;
-        background: var(--surface-strong);
-        border-radius: 2px;
-        overflow: hidden;
-        margin: var(--space-sm) 0;
-        display: flex;
-      }
-      .sentiment-bull {
-        background: var(--trading-up);
-        transition: width 0.3s;
-      }
-      .sentiment-bear {
-        background: var(--trading-down);
-        transition: width 0.3s;
-      }
-
-      .stat-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 6px 0;
-        font-size: 13px;
-      }
-      .stat-label {
-        color: var(--muted);
-        font-weight: 500;
-      }
-      .stat-value {
-        font-weight: 600;
-        color: var(--ink);
-      }
-
       .loading {
         text-align: center;
         color: var(--muted);
@@ -726,7 +702,7 @@
         justify-content: center;
       }
 
-      /* Orderbook UI */
+      /* -- orderbook -- */
       .ob-table {
         display: flex;
         flex-direction: column;
@@ -818,7 +794,7 @@
         margin-top: 2px;
       }
 
-      /* ── Live Insights Panel ── */
+      /* -- live insights panel -- */
 
       #liveInsightsPanel {
         position: fixed;
@@ -926,7 +902,7 @@
         border-color: var(--hairline-soft);
         box-shadow: var(--shadow-card);
       }
-      /* Section label — neutral ink, left accent bar for structure */
+      /* section label with colored accent bar */
       .li-card-label {
         font-size: 10px;
         font-weight: 700;
@@ -948,7 +924,7 @@
         background: var(--muted);
         flex-shrink: 0;
       }
-      /* Override accent color per card type */
+      /* accent color per insight card type */
       .li-card-label.pressure::before {
         background: var(--trading-down);
       }
@@ -958,7 +934,7 @@
       .li-card-label.whale::before {
         background: #9ca3af;
       }
-      /* Mini bar chart for orderbook */
+      /* orderbook mini bar chart */
       .li-ob-bars {
         display: flex;
         height: 32px;
@@ -978,14 +954,14 @@
         flex: 1;
         transition: height 0.3s;
       }
-      /* Mini sparkline canvas */
+      /* sparkline canvas */
       .li-spark {
         width: 100%;
         height: 36px;
         display: block;
         margin-bottom: 6px;
       }
-      /* Whale volume bar */
+      /* volume context bar */
       .li-vol-bar-wrap {
         height: 6px;
         background: var(--surface-strong);
@@ -1030,7 +1006,7 @@
         font-weight: 600;
         color: var(--body);
       }
-      /* Stream loading overlay */
+      /* stream loading overlay */
       .stream-overlay {
         position: absolute;
         inset: 0;
@@ -1052,7 +1028,7 @@
         pointer-events: none;
       }
 
-      /* ── Tablet Landscape ── */
+      /* -- responsive: tablet landscape -- */
       @media (max-width: 1024px) {
         .sidebar {
           width: 300px;
@@ -1074,7 +1050,7 @@
         }
       }
 
-      /* ── Tablet Portrait & Large Phones ── */
+      /* -- responsive: tablet portrait -- */
       @media (max-width: 768px) {
         .toolbar.floating-nav {
           width: 100%;
@@ -1211,7 +1187,7 @@
         }
       }
 
-      /* ── Phone ── */
+      /* -- responsive: phone -- */
       @media (max-width: 480px) {
         .nav-row-primary {
           height: 40px;
@@ -1259,7 +1235,7 @@
           gap: 4px;
         }
 
-        /* Hide labels on phone, keep icons */
+        /* hide text labels on small screens, keep icons */
         #activeChartTypeText,
         #activeTimeframeText {
           display: none;
@@ -1354,7 +1330,7 @@
         }
       }
 
-      /* ── Shared touch & overscroll polish ── */
+      /* -- touch device overrides -- */
       @media (hover: none) and (pointer: coarse) {
         .pair-btn,
         .btn,
@@ -1397,7 +1373,6 @@
 
         <div class="nav-pill-group" id="pairSelector"></div>
 
-        <!-- Spacer -->
         <div style="flex: 1"></div>
 
         <div
@@ -1504,7 +1479,6 @@
           Vol
         </button>
 
-        <!-- Spacer -->
         <div style="flex: 1"></div>
 
         <button class="btn tooltip" id="btn-theme" data-tooltip="Toggle Theme">
@@ -1715,6 +1689,7 @@
     </div>
 
     <script>
+      // -- theme detection and initial setup --
       const prefersDark =
         window.matchMedia &&
         window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -1727,6 +1702,7 @@
           prefersDark ? "tabler:sun" : "tabler:moon",
         );
 
+      // -- trading pairs and their iconify icon keys --
       const pairs = ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP", "ADA", "LINK"];
       const cryptoIcons = {
         BTC: "cryptocurrency-color:btc",
@@ -1739,6 +1715,7 @@
         LINK: "cryptocurrency-color:link",
       };
 
+      // -- core state --
       let currentPair = "BTC";
       let ws = null;
       let chart = null;
@@ -1753,21 +1730,20 @@
       let rsiSeries = null;
       let isSwitching = false;
 
-      // WS reconnect backoff state
+      // websocket reconnect with exponential backoff
       let reconnectAttempt = 0;
       const MAX_RECONNECT_DELAY = 30000;
 
-      // Orderbook fetch abort + interval
+      // orderbook polling state
       let obAbortController = null;
       let obIntervalId = null;
 
-      // Indicators disabled by default
       const indicators = { vwap: false, ema: false, rsi: false, vol: false };
       const candles = {};
       const rsiState = {};
       const vwapState = {};
 
-      const MAX_CANDLES = 1200;
+      const MAX_CANDLES = 1200; // cap to prevent memory bloat
 
       pairs.forEach((pair) => {
         candles[pair] = [];
@@ -1775,6 +1751,7 @@
         vwapState[pair] = { cumTPV: 0, cumVol: 0, resetDay: -1 };
       });
 
+      // -- pair selector buttons --
       function createPairButtons() {
         const container = document.getElementById("pairSelector");
         container.innerHTML = "";
@@ -1787,6 +1764,7 @@
           container.appendChild(btn);
         });
       }
+      // removes all chart series before rebuilding (pair/timeframe switch)
       function destroyAllSeries() {
         [
           mainSeries,
@@ -1811,6 +1789,7 @@
             null;
       }
 
+      // creates indicator overlays (volume, vwap, ema, rsi)
       function createIndicatorSeries() {
         volumeSeries = chart.addHistogramSeries({
           color: "#e5e7eb",
@@ -1857,12 +1836,14 @@
         });
       }
 
+      // restarts orderbook polling (called on pair switch)
       function resetObInterval() {
         clearInterval(obIntervalId);
         fetchOrderbookDepth();
         obIntervalId = setInterval(fetchOrderbookDepth, 30000);
       }
 
+      // tears down current ws/state and reconnects to a new pair
       function switchPair(pair) {
         if (pair === currentPair) return;
         currentPair = pair;
@@ -1902,6 +1883,7 @@
         setTimeout(startStream, 100);
       }
 
+      // -- chart initialization (lightweight-charts) --
       function initChart() {
         const chartContainer = document.getElementById("chart");
         const isDark =
@@ -1979,6 +1961,7 @@
         });
       }
 
+      // transforms raw candle data for the active chart type
       function getChartData() {
         const raw = candles[currentPair];
         if (!raw.length) return [];
@@ -2035,6 +2018,8 @@
         const data = getChartData();
         if (data.length) mainSeries.setData(data);
       }
+      // -- technical indicator calculations --
+      // incremental ema: maintains running state to avoid full recalc
       function calcEMAIncr(state, price, period) {
         state.buf.push(price);
         if (state.buf.length < period) return null;
@@ -2047,6 +2032,7 @@
         return state.val;
       }
 
+      // vwap resets daily, accumulates typical_price * volume
       function updateVWAP(candle, pair) {
         const state = vwapState[pair];
         const day = new Date(candle.time * 1000).getUTCDate();
@@ -2061,6 +2047,7 @@
         return state.cumVol > 0 ? state.cumTPV / state.cumVol : candle.close;
       }
 
+      // wilder's smoothed rsi(14), needs 15+ closes to produce a value
       function updateRSI(closes, pair) {
         if (closes.length < 15) return null;
         const state = rsiState[pair];
@@ -2096,8 +2083,9 @@
           });
       }
 
+      // fetches orderbook depth + 24h ticker from binance rest api
+      // aborts previous in-flight request to avoid stale data races
       async function fetchOrderbookDepth() {
-        // Abort any in-flight fetch before starting a new one
         if (obAbortController) obAbortController.abort();
         obAbortController = new AbortController();
         const { signal } = obAbortController;
@@ -2150,7 +2138,7 @@
 
           const maxTotal = Math.max(askTotal, bidTotal);
 
-          // Build HTML using validated numeric values only
+
           const asksHtml = asks
             .reverse()
             .map(
@@ -2193,7 +2181,7 @@
               <div style="padding-bottom:4px">${bidsHtml}</div>
             </div>`;
 
-          // Populate 24h stats panel
+          // update 24h stats sidebar
           const fmt = (n, dp = 2) =>
             parseFloat(n).toLocaleString("en-US", {
               minimumFractionDigits: dp,
@@ -2231,13 +2219,14 @@
 
           updateInsightsOrderbook(bids, asks, maxTotal);
         } catch (error) {
-          if (error.name === "AbortError") return; // intentional abort, not an error
+          if (error.name === "AbortError") return;
           console.error("[Fetch] fetchOrderbookDepth failed:", error);
           widget.innerHTML =
             '<div class="loading"><span class="iconify" data-icon="tabler:alert-triangle" style="font-size:24px;color:var(--trading-down);margin-bottom:8px"></span><br/>Orderbook unavailable. Retrying...</div>';
         }
       }
 
+      // updates the sidebar technical signals panel
       function updateSignals(candle, rsi, ema9, ema21, vwap) {
         const widget = document.getElementById("signalsWidget");
 
@@ -2304,6 +2293,7 @@
             `;
       }
 
+      // -- websocket stream (binance kline) --
       function startStream() {
         if (ws) return;
         const symbol = currentPair.toLowerCase() + "usdt";
@@ -2327,7 +2317,7 @@
 
         ws.onopen = () => {
           isSwitching = false;
-          reconnectAttempt = 0; // reset backoff on successful open
+          reconnectAttempt = 0;
           document.getElementById("status").classList.add("live");
         };
 
@@ -2343,7 +2333,6 @@
             volume: parseFloat(k.v),
           };
 
-          // Dismiss stream overlay on first tick
           const overlay = document.getElementById("streamOverlay");
           if (overlay && !overlay.classList.contains("hidden"))
             overlay.classList.add("hidden");
@@ -2376,7 +2365,7 @@
           if (candles[currentPair].length === 10)
             chart.timeScale().fitContent();
 
-          // Chart update — HA is computed incrementally (P2 fix)
+          // build the data point for the active chart type
           let pointToUpdate;
           if (chartType === "heikinAshi") {
             const haClose =
@@ -2445,6 +2434,7 @@
         };
       }
 
+      // toggles indicator visibility on chart and button state
       function toggleIndicator(key, btnId, seriesArray) {
         indicators[key] = !indicators[key];
         document
@@ -2458,6 +2448,7 @@
         else if (seriesArray) seriesArray.applyOptions({ visible });
       }
 
+      // syncs chart colors with the current light/dark theme
       function applyChartTheme(isDark) {
         if (!chart) return;
         chart.applyOptions({
@@ -2487,7 +2478,7 @@
         applyChartTheme(!isDark);
       };
 
-      /* ── UI Handlers & Interaction ─────────────────────────── */
+      // -- ui handlers --
       document.getElementById("chartTypeBtn").onclick = (e) => {
         e.stopPropagation();
         document.getElementById("chartTypeMenu").classList.toggle("open");
@@ -2551,7 +2542,7 @@
         };
       });
 
-      // Indicators
+      // indicator toggle buttons
       document.getElementById("btn-vwap").onclick = () =>
         toggleIndicator("vwap", "btn-vwap", vwapSeries);
       document.getElementById("btn-ema").onclick = () =>
@@ -2645,12 +2636,12 @@
           new Date().toUTCString().slice(17, 25) + " UTC";
       }
 
-      // ── Live Insights Engine ──
-      // Uses a 20-bar rolling window for volume context.
-      // Price Bias reads RSI + VWAP + EMA9/21 alignment — never just 1 signal.
+      // -- live insights engine --
+      // 20-bar rolling volume window, multi-signal consensus for price bias
       const insightsVolWindow = [];
       const INSIGHTS_VOL_WINDOW = 20;
 
+      // draws a mini price sparkline on the insights panel canvas
       function drawSparkline(closes) {
         const canvas = document.getElementById("liSparkCanvas");
         if (!canvas) return;
@@ -2661,7 +2652,7 @@
         ctx.clearRect(0, 0, w, h);
         if (closes.length < 2) return;
 
-        const slice = closes.slice(-40); // 40 candles for a stable sparkline
+        const slice = closes.slice(-40);
         const min = Math.min(...slice);
         const max = Math.max(...slice);
         const range = max - min || 1;
@@ -2687,7 +2678,7 @@
         ctx.stroke();
       }
 
-      // Card 2: Price Bias — RSI + VWAP + EMA consensus
+      // price bias card: scores rsi + vwap + ema alignment into a verdict
       function updateInsightsMomentum(candle, vwap, closes) {
         const text = document.getElementById("liMomText");
         const meta = document.getElementById("liMomMeta");
@@ -2696,7 +2687,7 @@
 
         drawSparkline(closes);
 
-        // Need enough candles and indicators for a credible read
+
         if (closes.length < 14 || vwap === null) {
           if (text) {
             text.textContent = "Building signal history...";
@@ -2710,11 +2701,11 @@
         const ema9v = parseFloat(candle.ema9);
         const ema21v = parseFloat(candle.ema21);
 
-        // Score each signal: +1 bullish, -1 bearish, 0 neutral
+        // score each signal: +1 bullish, -1 bearish, 0 neutral
         let score = 0;
         const signals = [];
 
-        // VWAP position
+
         const vwapPct = ((price - vwap) / vwap) * 100;
         if (vwapPct > 0.05) {
           score++;
@@ -2726,7 +2717,7 @@
           signals.push("At VWAP");
         }
 
-        // RSI
+
         if (!isNaN(rsiVal)) {
           if (rsiVal < 35) {
             score++;
@@ -2739,7 +2730,7 @@
           }
         }
 
-        // EMA9 vs EMA21 alignment
+
         if (!isNaN(ema9v) && !isNaN(ema21v)) {
           if (ema9v > ema21v) {
             score++;
@@ -2750,7 +2741,7 @@
           }
         }
 
-        // Verdict
+
         let verdict, color;
         if (score >= 2) {
           verdict = "Bullish bias — multiple signals aligned upward.";
@@ -2776,7 +2767,7 @@
         if (meta) meta.textContent = signals.join(" · ");
       }
 
-      // Card 3: Volume Context — not "whale tracker", just honest volume analysis
+      // volume context card: compares current bar volume to 20-bar rolling avg
       function updateInsightsWhale(candle) {
         const text = document.getElementById("liWhaleText");
         const meta = document.getElementById("liWhaleMeta");
@@ -2790,7 +2781,7 @@
           insightsVolWindow.reduce((a, b) => a + b, 0) /
           insightsVolWindow.length;
         const ratio = avgVol > 0 ? candle.volume / avgVol : 0;
-        const barPct = Math.min(ratio * 40, 100).toFixed(0); // 2.5× avg = full bar
+        const barPct = Math.min(ratio * 40, 100).toFixed(0);
 
         if (bar) {
           bar.style.width = barPct + "%";
@@ -2830,6 +2821,7 @@
         if (meta) meta.textContent = `${ratio.toFixed(1)}× 20-bar avg`;
       }
 
+      // orderbook pressure card: visualizes bid/ask imbalance
       function updateInsightsOrderbook(bids, asks, maxTotal) {
         const barsEl = document.getElementById("liObBars");
         const text = document.getElementById("liObText");
@@ -2842,7 +2834,7 @@
         const bidPct = bidVol / total;
         const askPct = askVol / total;
 
-        // Build 8 side-by-side bars (4 bids, 4 asks)
+        // 4 ask bars + 4 bid bars side by side
         const numBars = 4;
         const bSlice = bids.slice(0, numBars);
         const aSlice = asks.slice(0, numBars);
@@ -2878,13 +2870,14 @@
           meta.textContent = `High Imbalance | ${(bidPct * 100).toFixed(0)}% Bid vs ${(askPct * 100).toFixed(0)}% Ask`;
       }
 
+      // -- boot --
       function init() {
         createPairButtons();
         initChart();
         startStream();
         setInterval(updateClock, 1000);
         updateClock();
-        resetObInterval(); // P2: tracked interval ID, cancellable on pair switch
+        resetObInterval();
       }
 
       document.addEventListener("DOMContentLoaded", init);
