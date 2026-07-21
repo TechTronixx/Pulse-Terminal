@@ -45,6 +45,13 @@ let obAbortController = null;
 let obIntervalId = null;
 
 const indicators = { vwap: false, ema: false, rsi: false, vol: false };
+
+// -- VPVR (Volume Profile Visible Range) --
+let vpvrView = null;
+const vpvrSettings = Object.assign(
+  {},
+  typeof VPVRView !== "undefined" ? VPVRView.DEFAULTS : {},
+);
 const candles = {};
 const rsiState = {};
 const vwapState = {};
@@ -142,6 +149,18 @@ function createIndicatorSeries() {
   });
 }
 
+// (re)creates the VPVR overlay bound to the current main series + settings
+function recreateVpvrView() {
+  if (vpvrView) {
+    vpvrView.destroy();
+    vpvrView = null;
+  }
+  if (chart && mainSeries) {
+    vpvrView = VPVRView.create(chart, mainSeries, () => candles[currentPair]);
+    if (vpvrView) vpvrView.setSettings(vpvrSettings);
+  }
+}
+
 // restarts orderbook polling (called on pair switch)
 function resetObInterval() {
   clearInterval(obIntervalId);
@@ -172,6 +191,7 @@ function switchPair(pair) {
   destroyAllSeries();
   initMainSeries();
   createIndicatorSeries();
+  recreateVpvrView();
   chart.timeScale().fitContent();
 
   rsiState[pair] = { avgGain: null, avgLoss: null, count: 0 };
@@ -241,6 +261,7 @@ function initChart() {
 
   initMainSeries();
   createIndicatorSeries();
+  recreateVpvrView();
 
   chart.subscribeCrosshairMove((param) => {
     const readout = document.getElementById("readout");
@@ -630,6 +651,7 @@ async function startStream() {
           low: parseFloat(k[3]),
           close: parseFloat(k[4]),
           volume: parseFloat(k[5]),
+          takerBuy: parseFloat(k[9]),
         };
 
         closes.push(candle.close);
@@ -732,6 +754,7 @@ async function startStream() {
       low: parseFloat(k.l),
       close: parseFloat(k.c),
       volume: parseFloat(k.v),
+      takerBuy: parseFloat(k.V),
     };
 
     const overlay = document.getElementById("streamOverlay");
@@ -816,6 +839,7 @@ async function startStream() {
     updateInsightsWhale(candle);
     updateInsightsMACD(closes);
     updateInsightsBB(candle.close, closes);
+    if (vpvrView) vpvrView.update();
   };
 
   ws.onclose = () => {
@@ -879,6 +903,7 @@ document.getElementById("btn-theme").onclick = () => {
     .getElementById("theme-icon")
     .setAttribute("data-icon", isDark ? "tabler:moon" : "tabler:sun");
   applyChartTheme(!isDark);
+  if (vpvrView) vpvrView.refreshTheme();
 };
 
 // -- ui handlers --
@@ -893,6 +918,7 @@ document.querySelectorAll(".chart-type-opt").forEach((btn) => {
       e.target.textContent;
     document.getElementById("chartTypeMenu").classList.remove("open");
     initMainSeries();
+    recreateVpvrView();
   };
 });
 document.addEventListener("click", (e) => {
@@ -901,6 +927,8 @@ document.addEventListener("click", (e) => {
     if (menu) menu.classList.remove("open");
     const tfMenu = document.getElementById("timeframeMenu");
     if (tfMenu) tfMenu.classList.remove("open");
+    const vpvrMenu = document.getElementById("vpvrMenu");
+    if (vpvrMenu) vpvrMenu.classList.remove("open");
   }
 });
 
@@ -954,6 +982,62 @@ document.getElementById("btn-rsi").onclick = () =>
   toggleIndicator("rsi", "btn-rsi", rsiSeries);
 document.getElementById("btn-vol").onclick = () =>
   toggleIndicator("vol", "btn-vol", volumeSeries);
+
+// -- VPVR toggle + settings --
+document.getElementById("btn-vpvr").onclick = () => {
+  vpvrSettings.enabled = !vpvrSettings.enabled;
+  document
+    .getElementById("btn-vpvr")
+    .classList.toggle("active", vpvrSettings.enabled);
+  if (vpvrView) vpvrView.setSettings({ enabled: vpvrSettings.enabled });
+};
+document.getElementById("vpvrSettingsBtn").onclick = (e) => {
+  e.stopPropagation();
+  document.getElementById("vpvrMenu").classList.toggle("open");
+};
+const _vpvrModeBtns = document.querySelectorAll("#vpvrMode button");
+_vpvrModeBtns.forEach((b) => {
+  b.onclick = (e) => {
+    e.stopPropagation();
+    _vpvrModeBtns.forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    vpvrSettings.mode = b.getAttribute("data-mode");
+    if (vpvrView) vpvrView.setSettings({ mode: vpvrSettings.mode });
+  };
+});
+const _vpvrRows = document.getElementById("vpvrRows");
+_vpvrRows.oninput = () => {
+  const v = parseInt(_vpvrRows.value, 10);
+  vpvrSettings.rows = v;
+  document.getElementById("vpvrRowsVal").textContent = v;
+  if (vpvrView) vpvrView.setSettings({ rows: v });
+};
+const _vpvrVa = document.getElementById("vpvrVa");
+_vpvrVa.oninput = () => {
+  const v = parseInt(_vpvrVa.value, 10);
+  vpvrSettings.vaPct = v / 100;
+  document.getElementById("vpvrVaVal").textContent = v;
+  if (vpvrView) vpvrView.setSettings({ vaPct: v / 100 });
+};
+const _vpvrWidth = document.getElementById("vpvrWidth");
+_vpvrWidth.oninput = () => {
+  const v = parseInt(_vpvrWidth.value, 10);
+  vpvrSettings.widthPx = v;
+  document.getElementById("vpvrWidthVal").textContent = v;
+  if (vpvrView) vpvrView.setSettings({ widthPx: v });
+};
+document.getElementById("vpvrPOC").onchange = (e) => {
+  vpvrSettings.showPOC = e.target.checked;
+  if (vpvrView) vpvrView.setSettings({ showPOC: e.target.checked });
+};
+document.getElementById("vpvrVAHVAL").onchange = (e) => {
+  vpvrSettings.showVAHVAL = e.target.checked;
+  if (vpvrView) vpvrView.setSettings({ showVAHVAL: e.target.checked });
+};
+document.getElementById("vpvrVAHL").onchange = (e) => {
+  vpvrSettings.showVA = e.target.checked;
+  if (vpvrView) vpvrView.setSettings({ showVA: e.target.checked });
+};
 document.getElementById("btn-fit").onclick = () => {
   if (chart) chart.timeScale().fitContent();
 };

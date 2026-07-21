@@ -156,6 +156,56 @@
         >
           Vol
         </button>
+        <button
+          class="btn tooltip"
+          id="btn-vpvr"
+          data-tooltip="Volume Profile (Visible Range)"
+        >
+          VPVR
+        </button>
+        <div class="clean-dropdown tooltip" data-tooltip="VPVR Settings">
+          <button class="clean-dropdown-toggle" id="vpvrSettingsBtn">
+            <span
+              class="iconify"
+              data-icon="tabler:adjustments"
+              style="font-size: 14px"
+            ></span>
+            <span
+              class="iconify"
+              data-icon="tabler:chevron-down"
+              style="font-size: 12px; color: var(--muted)"
+            ></span>
+          </button>
+          <div class="clean-dropdown-menu vpvr-menu" id="vpvrMenu">
+            <div class="vpvr-field">
+              <span class="vpvr-label">Display</span>
+              <div class="vpvr-seg" id="vpvrMode">
+                <button data-mode="total" class="active">Total</button>
+                <button data-mode="buysell">B/S</button>
+                <button data-mode="delta">Delta</button>
+              </div>
+            </div>
+            <div class="vpvr-field">
+              <span class="vpvr-label">Rows <em id="vpvrRowsVal">24</em></span>
+              <input type="range" id="vpvrRows" min="10" max="50" step="1" value="24" />
+            </div>
+            <div class="vpvr-field">
+              <span class="vpvr-label"
+                >Value Area <em id="vpvrVaVal">70</em>%</span
+              >
+              <input type="range" id="vpvrVa" min="50" max="90" step="1" value="70" />
+            </div>
+            <div class="vpvr-field">
+              <span class="vpvr-label">Width <em id="vpvrWidthVal">130</em></span>
+              <input type="range" id="vpvrWidth" min="60" max="220" step="10" value="130" />
+            </div>
+            <div class="vpvr-toggles">
+              <label><input type="checkbox" id="vpvrPOC" checked /> POC line</label>
+              <label><input type="checkbox" id="vpvrVAHVAL" checked /> VAH/VAL</label>
+              <label><input type="checkbox" id="vpvrVAHL" checked /> VA shade</label>
+            </div>
+          </div>
+        </div>
 
         <div style="flex: 1"></div>
 
@@ -392,6 +442,8 @@
       </div>
     </div>
 
+    <script src="js/vpvr.js"></script>
+    <script src="js/vpvr-view.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>

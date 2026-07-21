@@ -1337,3 +1337,124 @@ body {
     cursor: default;
   }
 }
+
+/* -- VPVR (Volume Profile Visible Range) -- */
+.vpvr-menu {
+  width: 200px;
+  padding: 10px 12px;
+  gap: 6px;
+}
+.vpvr-menu .vpvr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+.vpvr-menu .vpvr-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.vpvr-menu .vpvr-label em {
+  font-style: normal;
+  color: var(--ink);
+  font-family: var(--font-num);
+}
+.vpvr-menu input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  height: 4px;
+}
+.vpvr-menu .vpvr-seg {
+  display: flex;
+  gap: 4px;
+}
+.vpvr-menu .vpvr-seg button {
+  flex: 1;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-sm);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 0;
+  cursor: pointer;
+}
+.vpvr-menu .vpvr-seg button.active {
+  background: var(--surface-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.vpvr-menu .vpvr-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--hairline-soft);
+}
+.vpvr-menu .vpvr-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--body);
+  cursor: pointer;
+}
+.vpvr-menu .vpvr-toggles input {
+  accent-color: var(--accent);
+}
+
+/* VPVR row tooltip */
+.vpvr-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-md);
+  box-shadow: var(--shadow-elevated);
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--ink);
+  font-family: var(--font-num);
+  min-width: 156px;
+}
+.vpvr-tip-title {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.vpvr-tip-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.vpvr-tip-table td {
+  padding: 1px 0;
+}
+.vpvr-tip-table td:first-child {
+  color: var(--muted);
+  padding-right: 12px;
+}
+.vpvr-tip-table td:last-child {
+  text-align: right;
+  color: var(--ink);
+  font-weight: 600;
+}
+.vpvr-tip-foot {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 600;
+}
