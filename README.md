@@ -1,11 +1,13 @@
-# Pulse Terminal: Crypto chart Interface
+# Pulse Terminal
 
-I built Pulse Terminal for my own personal use. I just wanted a clean, focused way to watch the quick `1s` crypto market info without having to manage a hundred different tabs. It hooks straight into Binance's WebSockets and REST APIs to provide real-time data in a single, lightweight view.
+[![Live Demo](https://img.shields.io/badge/Live_Demo-green?style=for-the-badge)](https://pulse-terminal.vercel.app)
+[![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/TechTronixx/Pulse-Terminal)
+![Issues](https://img.shields.io/github/issues/TechTronixx/Pulse-Terminal)
+![Stars](https://img.shields.io/github/stars/TechTronixx/Pulse-Terminal)
+![Last commit](https://img.shields.io/github/last-commit/TechTronixx/Pulse-Terminal)
+![License](https://img.shields.io/github/license/TechTronixx/Pulse-Terminal)
 
-![Vercel](https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)
-![Live](https://img.shields.io/badge/Live-green?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
-![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge)
+A clean, focused, single-view terminal for watching the `1s` crypto market in real time, powered by Binance's WebSocket and REST APIs.
 
 ## Screenshots
 
@@ -13,41 +15,51 @@ I built Pulse Terminal for my own personal use. I just wanted a clean, focused w
 | :-----------------------------------: | :---------------------------------: |
 | ![Light Mode](./screenshot-light.png) | ![Dark Mode](./screenshot-dark.png) |
 
-## [Live Demo ](https://pulse-terminal.vercel.app)
+## Live Demo
+
+**https://pulse-terminal.vercel.app**
 
 ## Key Features
 
-- **Orderbook Depth**: See the real-time bid/ask spread and where the big walls are sitting.
-- **Momentum Insights**: Automated logic that tracks volume spikes, RSI levels, and VWAP crossovers.
-- **Fast Timeframes**: Supports 1s, 1m, 3m, 5m, 15m, and 30m intervals.
-- **Clean Charting**: Built on Lightweight Charts v4.1.1 with custom themes for both light and dark modes.
+- **Orderbook Depth** — Real-time bid/ask spread and visible wall size.
+- **Momentum Insights** — Automated tracking of volume spikes, RSI, and VWAP crossovers.
+- **Fast Timeframes** — 1s, 1m, 3m, 5m, 15m, and 30m intervals.
+- **Clean Charting** — Lightweight Charts v4.1.1 with custom light and dark themes.
 
 ## Tech Stack
 
-- **Core**: Vanilla HTML5, CSS3, and JavaScript (ES6+).
-- **Charting**: Lightweight Charts v4.1.1.
-- **Icons**: Iconify Framework.
-- **API**: Binance Public WebSocket & REST API.
+- **Core** — Vanilla HTML5, CSS3, JavaScript (ES6+).
+- **Charting** — Lightweight Charts v4.1.1.
+- **Icons** — Iconify.
+- **API** — Binance public WebSocket and REST API.
+
+## Quick Start
+
+No build tools or dependencies required. Open `Terminal-main.html` in any modern browser.
 
 ## Running Locally
 
-No build tools or dependencies required.
-
-```
+```bash
 git clone https://github.com/TechTronixx/Pulse-Terminal.git
 cd Pulse-Terminal
 ```
 
-Open `Terminal-main.html` in any modern browser.
+Either open `Terminal-main.html` directly, or run a local server:
 
-Alternatively, run a local server:
-
-```
+```bash
 npx -y serve .
 ```
 
-Visit `http://localhost:3000` once the server starts.
+Then visit `http://localhost:3000`.
 
----
+## Disclaimer
 
-_Note: This is a frontend-only terminal. No private keys or trading credentials should be entered here as it is designed for monitoring and Personal use._
+- Frontend-only. All requests target Binance's public endpoints.
+- Does not place trades, hold funds, or access private accounts.
+- Do not enter private keys or trading credentials anywhere in this app.
+- You are responsible for complying with Binance's terms of service.
+- Provided "AS IS", without warranty of any kind.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
