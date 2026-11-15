@@ -17,6 +17,7 @@
     { key: "ema", name: "EMA 9 / 21", desc: "Two exponential moving averages. Blue (9) reacts fast, purple (21) is slower. Blue above purple = short-term uptrend." },
     { key: "rsi", name: "RSI 14", desc: "Relative Strength Index in its own pane, 0 to 100. Above 70 = overbought, below 30 = oversold." },
     { key: "vpvr", name: "VPVR", note: "Visible range", settings: "menuVpvr", desc: "Volume profile on the right edge: how much traded at each price in the visible range. POC = busiest price, VAH / VAL = the band holding 70% of volume." },
+    { key: "ichi", name: "Ichimoku Cloud", note: "Auto: crypto 20/60/120/30, others 9/26/52/26", settings: "menuIchi", desc: "Trend at a glance. Price above the cloud = uptrend, below = downtrend, inside = no clear trend. Green cloud = bullish, red = bearish. Blue line crossing above red = momentum turning up. Settings adapt to 24/7 crypto vs stocks and commodities." },
     { key: "mcb", name: "Market Cipher B", note: "WaveTrend, MFI, Stoch", settings: "menuMcb", desc: "Momentum oscillator. Blue waves show momentum, green / red area shows money flow, dots mark crosses. Big green dot at the bottom = oversold buy signal, big red dot at the top = overbought sell signal. Open settings for the full guide." },
   ];
   const MCB_ALERTS = [
@@ -40,8 +41,9 @@
     panelOpen: true,
     panelW: null,
     watch: ["BTC", "ETH", "SOL", "NVDA", "SPY", "XAU", "CL"],
-    ind: { vol: true, vwap: false, ema: false, rsi: false, vpvr: false, mcb: true },
+    ind: { vol: true, vwap: false, ema: false, rsi: false, vpvr: false, ichi: false, mcb: true },
     mcb: Object.assign({}, I.MCB_DEFAULTS),
+    ichi: Object.assign({ preset: "auto" }, I.ICHIMOKU_PRESETS.classic),
     alerts: { inApp: true, notify: false },
     vpvr: {},
   };
@@ -54,6 +56,7 @@
     const s = Object.assign({}, defaults, saved);
     s.ind = Object.assign({}, defaults.ind, saved.ind);
     s.mcb = Object.assign({}, defaults.mcb, saved.mcb);
+    s.ichi = Object.assign({}, defaults.ichi, saved.ichi);
     s.alerts = Object.assign({}, defaults.alerts, saved.alerts);
     s.vpvr = Object.assign({}, window.VPVRView ? VPVRView.DEFAULTS : {}, saved.vpvr, { enabled: !!s.ind.vpvr });
     if (!PAIRS.includes(s.pair)) s.pair = defaults.pair;
@@ -140,8 +143,18 @@
       ema21: I.ema(closes, 21),
       rsi: I.rsi(closes, 14),
       mcb: state.ind.mcb ? I.marketCipherB(bars, state.mcb) : null,
+      ichi: state.ind.ichi ? I.ichimoku(bars, ichiParams()) : null,
+      tf: state.tf,
       closes,
     };
+  }
+
+  // Ichimoku lengths: Auto picks the 24/7 crypto set or the classic set by market group.
+  function ichiParams() {
+    const p = state.ichi;
+    if (p.preset === "crypto" || (p.preset === "auto" && inst().group === "crypto")) return { ...I.ICHIMOKU_PRESETS.crypto };
+    if (p.preset === "classic" || p.preset === "auto") return { ...I.ICHIMOKU_PRESETS.classic };
+    return { tenkan: p.tenkan, kijun: p.kijun, senkou: p.senkou, displacement: p.displacement };
   }
 
   // Intra-bar ticks between full recomputes: move only the live candle and its volume.
@@ -223,6 +236,7 @@
     if (typeof recomputeMtf === "function") {
       recomputeMtf();
       updateInsights(true);
+      scheduleReads(true);
     }
     save();
   }
@@ -235,7 +249,8 @@
       chartView.setData(model);
       const n = bars.length;
       if (n) {
-        chartView.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 160), to: n + 8 });
+        const ahead = model.ichi ? model.ichi.shift + 4 : 8;
+        chartView.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 160), to: n + ahead });
         lastBarTime = bars[n - 1].time;
       }
       historyReady = true;
@@ -244,6 +259,7 @@
       updateQuote();
       updateLegend();
       updateInsights(true);
+      scheduleReads(true);
       loadVwapSeed(bars);
     },
     onBars(bars, { from, reset, closedTimes, trimmed }) {
@@ -280,6 +296,7 @@
       updateQuote();
       if (hoverIndex < 0) updateLegend();
       updateInsights(false);
+      scheduleReads();
     },
     onDepth(depth) {
       renderBook(depth);
@@ -339,6 +356,7 @@
     renderSymbol();
     renderStar();
     renderWatch();
+    renderLegendVisibility();
     applyPrecision();
     startFeed();
     resetMarketData();
@@ -692,6 +710,17 @@
       setVal("lgEma21", model.ema21[i], fmtPrice);
     }
     if (state.ind.rsi) setVal("lgRsi", model.rsi[i], (v) => fmtNum(v, 2));
+    if (state.ind.ichi && model.ichi) {
+      const ich = model.ichi;
+      setVal("lgTenkan", ich.tenkan[i], fmtPrice);
+      setVal("lgKijun", ich.kijun[i], fmtPrice);
+      const j = i - ich.shift;
+      const a = j >= 0 ? ich.spanA[j] : NaN;
+      const b = j >= 0 ? ich.spanB[j] : NaN;
+      const el = $("lgCloud");
+      el.textContent = isNa(a) || isNa(b) ? "\u2013" : `${fmtPrice(Math.min(a, b))} \u2013 ${fmtPrice(Math.max(a, b))}`;
+      el.dataset.dir = a >= b ? "up" : "down";
+    }
     if (state.ind.mcb && model.mcb) {
       const m = model.mcb;
       setVal("lgFast", m.fast[i], (v) => fmtNum(v, 2));
@@ -711,6 +740,9 @@
     $("lgEmaRow").hidden = !state.ind.ema;
     $("legendMcb").hidden = !state.ind.mcb;
     $("legendRsi").hidden = !state.ind.rsi;
+    $("lgIchiRow").hidden = !state.ind.ichi;
+    const ip = ichiParams();
+    $("lgIchiParams").textContent = [ip.tenkan, ip.kijun, ip.senkou, ip.displacement].join(" ");
     const p = state.mcb;
     $("lgMcbParams").textContent = [p.wt_emaLen, p.wt_avgLen, p.wt_maLen, p.mfi_smaLen, p.mfi_signLen, p.rsi_len, p.rsi_k, p.stoch_len, p.stoch_k].join(" ");
   }
@@ -744,6 +776,263 @@
     hoverIndex = idx;
     updateLegend();
   });
+
+  // ---------------------------------------------------------------- Ichimoku settings
+  const ichiForm = $("ichiForm");
+  function fillIchiForm() {
+    const p = state.ichi.preset === "custom" ? state.ichi : ichiParams();
+    for (const el of ichiForm.elements) if (el.name) el.value = p[el.name];
+    for (const b of $("ichiPreset").children) b.setAttribute("aria-checked", String(b.dataset.preset === state.ichi.preset));
+  }
+  $("ichiPreset").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-preset]");
+    if (!b) return;
+    const preset = b.dataset.preset;
+    if (preset === "custom") Object.assign(state.ichi, ichiParams());
+    state.ichi.preset = preset;
+    fillIchiForm();
+    applyIndicators();
+  });
+  let ichiTimer = 0;
+  ichiForm.addEventListener("input", (e) => {
+    const el = e.target;
+    if (!el.name) return;
+    const v = Math.floor(+el.value);
+    if (!(v >= 1 && v <= 500)) {
+      el.setAttribute("aria-invalid", "true");
+      return;
+    }
+    el.removeAttribute("aria-invalid");
+    if (state.ichi.preset !== "custom") Object.assign(state.ichi, ichiParams());
+    state.ichi.preset = "custom";
+    state.ichi[el.name] = v;
+    for (const b of $("ichiPreset").children) b.setAttribute("aria-checked", String(b.dataset.preset === "custom"));
+    clearTimeout(ichiTimer);
+    ichiTimer = setTimeout(applyIndicators, 150);
+  });
+
+  // ---------------------------------------------------------------- plain-language reads
+  // One short, live reading per enabled indicator on the latest bar. Feeds the chart
+  // legend chips and the "What the indicators say" list in the Signal tab.
+  let readsAt = 0;
+  let readsTimer = 0;
+  const pctDiff = (a, b) => ((a - b) / b) * 100;
+
+  function computeReads() {
+    const bars = model.bars;
+    const n = bars.length;
+    const out = [];
+    if (n < 2) return out;
+    const i = n - 1;
+    const price = bars[i].close;
+
+    if (state.ind.ichi && model.ichi) {
+      const r = I.ichimokuRead(bars, model.ichi);
+      if (!r.ready) out.push({ key: "ichi", name: "Ichimoku", tone: "flat", chip: "Warming up", text: "Not enough bars yet to draw the cloud under price." });
+      else {
+        const where = r.position === "above" ? "above the cloud: the trend is up" : r.position === "below" ? "below the cloud: the trend is down" : "inside the cloud: no clear trend, expect choppy moves";
+        const tk = r.tkCross
+          ? `Tenkan just crossed ${r.tkCross.dir === "up" ? "above" : "below"} Kijun${r.tkCross.ago ? ` ${r.tkCross.ago} bar${r.tkCross.ago > 1 ? "s" : ""} ago` : ""}, momentum turning ${r.tkCross.dir}.`
+          : r.tk === "bull" ? "Tenkan is above Kijun, short-term momentum is up." : "Tenkan is below Kijun, short-term momentum is down.";
+        const ahead = r.futureBullish ? "The cloud ahead is green." : "The cloud ahead is red.";
+        const tone = r.score > 0.3 ? "up" : r.score < -0.3 ? "down" : "flat";
+        out.push({
+          key: "ichi",
+          name: "Ichimoku",
+          tone,
+          chip: `${r.position === "above" ? "Above" : r.position === "below" ? "Below" : "In"} cloud \u00b7 ${tone === "up" ? "bullish" : tone === "down" ? "bearish" : "mixed"}`,
+          text: `Price is ${where}. ${tk} ${ahead}`,
+          detail: `Cloud ${fmtPrice(r.cloudBottom)} \u2013 ${fmtPrice(r.cloudTop)} (${fmtNum(r.thickness * 100, 2)}% thick). Lagging span is ${r.chikou} the price ${model.ichi.shift} bars ago. Lengths ${Object.values(ichiParams()).join(" / ")}.`,
+        });
+      }
+    }
+
+    if (state.ind.mcb && model.mcb) {
+      const r = V.readTimeframe(model.mcb);
+      if (!r.ready) out.push({ key: "mcb", name: "Market Cipher B", tone: "flat", chip: "Warming up", text: "Not enough bars yet for the waves." });
+      else {
+        const m = model.mcb;
+        const rising = m.fast[i] > m.fast[i - 1];
+        const zone = r.zone.key === "oversold" ? "deep in oversold" : r.zone.key === "nearOversold" ? "near oversold" : r.zone.key === "overbought" ? "deep in overbought" : r.zone.key === "nearOverbought" ? "near overbought" : "in the middle range";
+        const dot = r.dot
+          ? `Last signal: ${r.dot.label.toLowerCase()} ${r.dot.ago === 0 ? "on this bar" : `${r.dot.ago} bar${r.dot.ago > 1 ? "s" : ""} ago`}${r.dot.strength === 1 ? (r.dot.sign > 0 ? " (oversold buy signal)" : " (overbought sell signal)") : ""}.`
+          : "No dots in the last 12 bars.";
+        const flow = r.flow === "inflow" ? "Money is flowing in." : r.flow === "outflow" ? "Money is flowing out." : "";
+        const tone = r.score > 0.15 ? "up" : r.score < -0.15 ? "down" : "flat";
+        out.push({
+          key: "mcb",
+          name: "Market Cipher B",
+          tone,
+          chip: `${r.bias} \u00b7 ${r.zone.label.toLowerCase()}`,
+          text: `Momentum is ${rising ? "rising" : "falling"} and ${zone}. ${dot} ${flow}`.trim(),
+          detail: `Fast ${fmtNum(r.fast, 1)}, slow ${fmtNum(r.slow, 1)}, MFI ${fmtNum(r.mf, 1)}. Read: ${r.action} (score ${signed(r.score)}).`,
+        });
+      }
+    }
+
+    if (state.ind.rsi) {
+      const v = model.rsi[i];
+      if (!isNa(v)) {
+        const band = v >= 70 ? ["Overbought", "down", "buyers may be stretched; pullbacks are common from here"] : v >= 55 ? ["Strong", "up", "buyers have the upper hand"] : v > 45 ? ["Neutral", "flat", "neither side is in control"] : v > 30 ? ["Weak", "down", "sellers have the upper hand"] : ["Oversold", "up", "sellers may be exhausted; bounces are common from here"];
+        out.push({ key: "rsi", name: "RSI 14", tone: band[1], chip: band[0], text: `RSI is ${fmtNum(v, 1)}: ${band[2]}.`, detail: "Above 70 = overbought, below 30 = oversold, 50 = balance." });
+      }
+    }
+
+    if (state.ind.ema) {
+      const a = model.ema9[i];
+      const b = model.ema21[i];
+      if (!isNa(a) && !isNa(b)) {
+        let cross = -1;
+        for (let k = i; k > i - 8 && k > 0; k--) {
+          if (Math.sign(model.ema9[k] - model.ema21[k]) !== Math.sign(model.ema9[k - 1] - model.ema21[k - 1])) {
+            cross = i - k;
+            break;
+          }
+        }
+        const up = a > b;
+        out.push({
+          key: "ema",
+          name: "EMA 9 / 21",
+          tone: up ? "up" : "down",
+          chip: up ? "9 above 21" : "9 below 21",
+          text: `The fast average is ${up ? "above" : "below"} the slow one: short-term trend is ${up ? "up" : "down"}${cross >= 0 ? `, crossed ${cross === 0 ? "on this bar" : `${cross} bar${cross > 1 ? "s" : ""} ago`}` : ""}.`,
+          detail: `EMA 9 ${fmtPrice(a)}, EMA 21 ${fmtPrice(b)}, gap ${fmtNum(pctDiff(a, b), 2)}%.`,
+        });
+      }
+    }
+
+    if (state.ind.vwap) {
+      const v = model.vwap[i];
+      if (!isNa(v)) {
+        const d = pctDiff(price, v);
+        const up = d >= 0;
+        out.push({
+          key: "vwap",
+          name: "VWAP",
+          tone: Math.abs(d) < 0.05 ? "flat" : up ? "up" : "down",
+          chip: `${up ? "+" : ""}${fmtNum(d, 2)}% vs VWAP`,
+          text: `Price is ${fmtNum(Math.abs(d), 2)}% ${up ? "above" : "below"} today's volume-weighted average: ${up ? "buyers are paying up" : "sellers are in control"}.`,
+          detail: `Session VWAP since 00:00 UTC: ${fmtPrice(v)}.`,
+        });
+      }
+    }
+
+    if (state.ind.vol && n > 22) {
+      let sum = 0;
+      for (let k = n - 22; k < n - 2; k++) sum += bars[k].volume;
+      const ratio = sum ? bars[n - 2].volume / (sum / 20) : NaN;
+      if (!isNa(ratio)) {
+        const upBar = bars[n - 2].close >= bars[n - 2].open;
+        const loud = ratio > 1.5;
+        out.push({
+          key: "vol",
+          name: "Volume",
+          tone: loud ? (upBar ? "up" : "down") : "flat",
+          chip: `${fmtNum(ratio, 1)}x avg`,
+          text: loud
+            ? `The last closed bar traded ${fmtNum(ratio, 1)}x its 20-bar average on a ${upBar ? "rising" : "falling"} candle: conviction behind the move.`
+            : ratio < 0.6
+              ? "Volume is light: moves now have little conviction."
+              : "Volume is normal.",
+          detail: "Last closed bar versus the average of the 20 bars before it.",
+        });
+      }
+    }
+
+    if (state.ind.vpvr && window.VPVR) {
+      let vis = bars;
+      try {
+        const r = chartView.chart.timeScale().getVisibleRange();
+        if (r) vis = bars.filter((b) => b.time >= r.from && b.time <= r.to);
+      } catch (_) {}
+      const p = VPVR.computeProfile(vis, { rows: state.vpvr.rows, vaPct: state.vpvr.vaPct });
+      if (p.pocPrice !== null) {
+        const inVa = price >= p.val && price <= p.vah;
+        const above = price > p.pocPrice;
+        out.push({
+          key: "vpvr",
+          name: "VPVR",
+          tone: inVa ? "flat" : price > p.vah ? "up" : "down",
+          chip: inVa ? "In value area" : price > p.vah ? "Above value" : "Below value",
+          text: inVa
+            ? `Price is inside the value area, ${above ? "above" : "below"} the busiest price (POC): fair value, range-bound trade is likely.`
+            : price > p.vah
+              ? "Price is above the value area: buyers accepted higher prices; the area top often acts as support."
+              : "Price is below the value area: sellers pushed below fair value; the area bottom often acts as resistance.",
+          detail: `POC ${fmtPrice(p.pocPrice)}, value area ${fmtPrice(p.val)} \u2013 ${fmtPrice(p.vah)} (visible bars).`,
+        });
+      }
+    }
+    return out;
+  }
+
+  function chip(id, read) {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = read ? read.chip : "";
+    el.dataset.tone = read ? read.tone : "flat";
+    el.hidden = !read;
+  }
+
+  function renderReads() {
+    readsAt = Date.now();
+    const reads = computeReads();
+    const by = Object.fromEntries(reads.map((r) => [r.key, r]));
+    chip("lgMcbRead", by.mcb);
+    chip("lgRsiRead", by.rsi);
+    // price-pane chips: Ichimoku, EMA, VWAP
+    const host = $("lgPriceReads");
+    const html = ["ichi", "ema", "vwap"]
+      .filter((k) => by[k])
+      .map((k) => `<span class="read-chip" data-tone="${by[k].tone}"><em>${by[k].name}</em> ${by[k].chip}</span>`)
+      .join("");
+    if (host.innerHTML !== html) host.innerHTML = html;
+
+    if (!insightsVisible()) return;
+    const list = $("exList");
+    if (!reads.length) {
+      list.innerHTML = '<li class="explain-empty">Switch on an indicator in the Indicators menu to see its reading here.</li>';
+      $("exTally").textContent = "\u2013";
+      return;
+    }
+    const up = reads.filter((r) => r.tone === "up").length;
+    const down = reads.filter((r) => r.tone === "down").length;
+    $("exTally").textContent = `${up} bullish \u00b7 ${down} bearish \u00b7 ${reads.length - up - down} neutral`;
+    if (list.children.length !== reads.length || list.querySelector(".explain-empty")) {
+      list.innerHTML = "";
+      for (let k = 0; k < reads.length; k++) {
+        const li = document.createElement("li");
+        li.className = "explain-item";
+        li.innerHTML = '<span class="explain-head"><i></i><b></b><span class="tag"></span></span><p></p>';
+        list.appendChild(li);
+      }
+    }
+    reads.forEach((r, k) => {
+      const li = list.children[k];
+      li.dataset.tone = r.tone;
+      li.dataset.tip = r.detail || "";
+      li.querySelector("b").textContent = r.name;
+      const tag = li.querySelector(".tag");
+      tag.textContent = r.tone === "up" ? "Bullish" : r.tone === "down" ? "Bearish" : "Neutral";
+      tag.dataset.tone = r.tone;
+      const p = li.querySelector("p");
+      if (p.textContent !== r.text) p.textContent = r.text;
+    });
+  }
+
+  function scheduleReads(force) {
+    if (force) {
+      clearTimeout(readsTimer);
+      readsTimer = 0;
+      return renderReads();
+    }
+    if (readsTimer) return;
+    const wait = Math.max(0, 400 - (Date.now() - readsAt));
+    readsTimer = setTimeout(() => {
+      readsTimer = 0;
+      renderReads();
+    }, wait);
+  }
 
   // ---------------------------------------------------------------- insights
   let insightsAt = 0;
@@ -825,7 +1114,8 @@
     const html = factors.map((f) => `<li data-tone="${f.tone}"><i></i>${f.label}</li>`).join("");
     if (list.innerHTML !== html) list.innerHTML = html;
 
-    lastClassic = { price, vwap, rsi, ema9: e9, ema21: e21, hist, prevHist, upper, lower };
+    const ichiRead = model.ichi ? I.ichimokuRead(bars, model.ichi) : null;
+    lastClassic = { price, vwap, rsi, ema9: e9, ema21: e21, hist, prevHist, upper, lower, ichi: ichiRead && ichiRead.ready ? ichiRead.score : NaN };
     chartTfRead = model.mcb ? V.readTimeframe(model.mcb) : null;
     renderVerdict();
 
@@ -1369,7 +1659,10 @@
       $(`tab-${tab}`).setAttribute("aria-selected", String(state.panel === tab));
       $(`view-${tab}`).hidden = state.panel !== tab;
     }
-    if (state.panel === "signal") updateInsights(true);
+    if (state.panel === "signal") {
+      updateInsights(true);
+      scheduleReads(true);
+    }
     if (state.panel === "market") renderMarket();
     syncWatchPolling();
   }
@@ -1394,6 +1687,7 @@
     save();
     renderStar();
     renderWatch();
+    renderLegendVisibility();
     if (want && !has && watchVisible()) {
       refreshWatchPrices();
       refreshWatchReads([id]);
@@ -1690,6 +1984,7 @@
   function showMenuView(id) {
     for (const v of menu.querySelectorAll(".menu-view")) v.hidden = v.id !== id;
     if (id === "menuMcb") fillMcbForm();
+    if (id === "menuIchi") fillIchiForm();
     if (id === "menuVpvr") fillVpvrForm();
     const first = menu.querySelector(`#${id} input, #${id} button`);
     if (first) first.focus({ preventScroll: true });

@@ -317,6 +317,91 @@
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Ichimoku Kinko Hyo, as TradingView's built-in: donchian(len) = avg(lowest low,
+  // highest high) over len bars; leading spans plotted displacement - 1 bars ahead,
+  // lagging span (close) plotted displacement - 1 bars back.
+  // ---------------------------------------------------------------------------
+  const ICHIMOKU_PRESETS = Object.freeze({
+    // 24/7 markets: about a week, a month and two months of daily sessions (7-day weeks)
+    crypto: Object.freeze({ tenkan: 20, kijun: 60, senkou: 120, displacement: 30 }),
+    // Hosoda's original 9 / 26 / 52 / 26 for markets with a 5-6 day trading week
+    classic: Object.freeze({ tenkan: 9, kijun: 26, senkou: 52, displacement: 26 }),
+  });
+
+  function donchian(high, low, len) {
+    const n = high.length;
+    const out = new Array(n).fill(NA);
+    for (let i = len - 1; i < n; i++) {
+      let hi = -Infinity;
+      let lo = Infinity;
+      for (let k = i - len + 1; k <= i; k++) {
+        if (high[k] > hi) hi = high[k];
+        if (low[k] < lo) lo = low[k];
+      }
+      out[i] = (hi + lo) / 2;
+    }
+    return out;
+  }
+
+  function ichimoku(bars, params) {
+    const p = Object.assign({}, ICHIMOKU_PRESETS.classic, params || {});
+    const high = bars.map((b) => b.high);
+    const low = bars.map((b) => b.low);
+    const tenkan = donchian(high, low, p.tenkan);
+    const kijun = donchian(high, low, p.kijun);
+    const spanA = tenkan.map((v, i) => (v + kijun[i]) / 2);
+    const spanB = donchian(high, low, p.senkou);
+    return { params: p, shift: Math.max(0, p.displacement - 1), tenkan, kijun, spanA, spanB };
+  }
+
+  // Plain reading of the Ichimoku state on bar i (defaults to the latest bar).
+  function ichimokuRead(bars, ich, i) {
+    const n = bars.length;
+    if (i === undefined) i = n - 1;
+    const s = ich.shift;
+    const close = bars[i] ? bars[i].close : NA;
+    const j = i - s; // the cloud drawn under bar i was computed on bar i - shift
+    const a = j >= 0 ? ich.spanA[j] : NA;
+    const b = j >= 0 ? ich.spanB[j] : NA;
+    const out = { ready: false };
+    if (isNa(close) || isNa(a) || isNa(b) || isNa(ich.tenkan[i]) || isNa(ich.kijun[i])) return out;
+    const top = Math.max(a, b);
+    const bottom = Math.min(a, b);
+    out.ready = true;
+    out.position = close > top ? "above" : close < bottom ? "below" : "inside";
+    out.cloudTop = top;
+    out.cloudBottom = bottom;
+    out.futureBullish = ich.spanA[i] > ich.spanB[i];
+    out.tk = ich.tenkan[i] > ich.kijun[i] ? "bull" : ich.tenkan[i] < ich.kijun[i] ? "bear" : "flat";
+    // fresh tenkan / kijun cross in the last 5 bars
+    out.tkCross = null;
+    for (let k = i; k > i - 5 && k > 0; k--) {
+      const d0 = ich.tenkan[k] - ich.kijun[k];
+      const d1 = ich.tenkan[k - 1] - ich.kijun[k - 1];
+      if (isNa(d0) || isNa(d1)) break;
+      if (d1 <= 0 && d0 > 0) {
+        out.tkCross = { dir: "up", ago: i - k };
+        break;
+      }
+      if (d1 >= 0 && d0 < 0) {
+        out.tkCross = { dir: "down", ago: i - k };
+        break;
+      }
+    }
+    // lagging span: today's close against the price `shift` bars ago
+    const past = bars[i - s];
+    out.chikou = past ? (close > past.high ? "above" : close < past.low ? "below" : "inside") : "unknown";
+    let score = 0;
+    score += out.position === "above" ? 0.4 : out.position === "below" ? -0.4 : 0;
+    score += out.tk === "bull" ? 0.25 : out.tk === "bear" ? -0.25 : 0;
+    score += out.futureBullish ? 0.15 : -0.15;
+    score += out.chikou === "above" ? 0.2 : out.chikou === "below" ? -0.2 : 0;
+    out.score = score;
+    out.thickness = Math.abs(a - b) / close;
+    return out;
+  }
+
   const api = {
     NA,
     isNa,
@@ -336,6 +421,10 @@
     bollinger,
     marketCipherB,
     MCB_DEFAULTS,
+    ichimoku,
+    ichimokuRead,
+    ICHIMOKU_PRESETS,
+    donchian,
   };
 
   global.PulseIndicators = api;

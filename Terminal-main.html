@@ -153,12 +153,20 @@
               <span class="legend-gap"></span>
               EMA 21 <b class="lg-ema21" id="lgEma21">&ndash;</b>
             </div>
+            <div class="legend-row num" id="lgIchiRow" hidden>
+              <span class="lg-label">Ichimoku <i id="lgIchiParams">20 60 120 30</i></span>
+              <span>Tenkan <b class="lg-tenkan" id="lgTenkan">&ndash;</b></span>
+              <span>Kijun <b class="lg-kijun" id="lgKijun">&ndash;</b></span>
+              <span>Cloud <b id="lgCloud">&ndash;</b></span>
+            </div>
+            <div class="legend-reads" id="lgPriceReads"></div>
           </div>
 
           <div class="legend legend-pane" id="legendMcb" hidden>
             <div class="legend-title">
               <strong>Market Cipher B</strong>
               <span class="num" id="lgMcbParams">9 12 3 5 60 40 2 81 2</span>
+              <span class="read-chip" id="lgMcbRead"></span>
             </div>
             <div class="legend-row num">
               <span>Fast <b class="lg-fast" id="lgFast">&ndash;</b></span>
@@ -171,7 +179,7 @@
           </div>
 
           <div class="legend legend-pane" id="legendRsi" hidden>
-            <div class="legend-title"><strong>RSI</strong><span class="num">14</span><b class="num" id="lgRsi">&ndash;</b></div>
+            <div class="legend-title"><strong>RSI</strong><span class="num">14</span><b class="num" id="lgRsi">&ndash;</b><span class="read-chip" id="lgRsiRead"></span></div>
           </div>
 
           <div class="chart-status" id="streamOverlay" role="status">
@@ -288,6 +296,14 @@
                 <span><i class="dot dot-R"></i>sell signal</span>
                 <span><i class="tf-chart-key"></i>chart</span>
               </p>
+            </div>
+
+            <div class="panel-section explain">
+              <div class="summary-head">
+                <h2 class="section-title" data-tip="Each indicator you have switched on, read in plain words on the latest bar of your chart timeframe. Hover a line for the numbers behind it.">What the indicators say</h2>
+                <span class="summary-risk num" id="exTally">&ndash;</span>
+              </div>
+              <ul class="explain-list" id="exList"><li class="explain-empty">Waiting for data</li></ul>
             </div>
 
             <div class="panel-section summary">
@@ -459,6 +475,41 @@
           <label class="check"><input type="checkbox" id="vpvrVAHVAL" checked /> VAH / VAL lines</label>
           <label class="check"><input type="checkbox" id="vpvrVAHL" checked /> Value area shade</label>
         </div>
+      </div>
+
+      <div class="menu-view" id="menuIchi" hidden>
+        <div class="menu-head">
+          <button type="button" class="icon-btn menu-back" data-back aria-label="Back"><svg class="ic"><use href="#i-back" /></svg></button>
+          <span>Ichimoku Cloud</span>
+        </div>
+        <form class="form" id="ichiForm" novalidate>
+          <details class="howto" open>
+            <summary>How Ichimoku works</summary>
+            <ul class="howto-list">
+              <li><i class="sw sw-cloud"></i><b>Cloud</b> (Senkou A and B, drawn ahead of price): green when A is above B, red when B is above A. Price above the cloud = uptrend, below = downtrend, inside = no clear trend. A thick cloud is strong support or resistance.</li>
+              <li><i class="sw sw-tenkan"></i><b>Tenkan</b> (blue, fast) and <i class="sw sw-kijun"></i><b>Kijun</b> (red, slow): midpoints of the recent high-low range. Tenkan crossing above Kijun = momentum turning up; below = turning down.</li>
+              <li><i class="sw sw-chikou"></i><b>Chikou</b> (green line, drawn back in time): today's close placed under the price from one displacement ago. Above that old price = trend confirmed up.</li>
+              <li><b>Settings per market</b>: crypto trades 7 days a week, so <b>Auto</b> uses 20 / 60 / 120 / 30 for crypto (a common 24/7 adaptation) and Hosoda's classic 9 / 26 / 52 / 26 for stocks and commodities.</li>
+            </ul>
+          </details>
+          <div class="field">
+            <span class="field-label">Preset</span>
+            <div class="seg seg-fill seg-4" id="ichiPreset" role="radiogroup" aria-label="Ichimoku preset">
+              <button type="button" role="radio" data-preset="auto" data-tip="Crypto 20/60/120/30, stocks and commodities 9/26/52/26">Auto</button>
+              <button type="button" role="radio" data-preset="crypto" data-tip="20 / 60 / 120 / 30 for 24/7 markets">Crypto</button>
+              <button type="button" role="radio" data-preset="classic" data-tip="9 / 26 / 52 / 26, Hosoda's original">Classic</button>
+              <button type="button" role="radio" data-preset="custom">Custom</button>
+            </div>
+          </div>
+          <fieldset>
+            <legend>Lengths</legend>
+            <label class="num-field">Tenkan (conversion) <input type="number" name="tenkan" min="1" step="1" inputmode="numeric" /></label>
+            <label class="num-field">Kijun (base) <input type="number" name="kijun" min="1" step="1" inputmode="numeric" /></label>
+            <label class="num-field">Senkou B (span) <input type="number" name="senkou" min="1" step="1" inputmode="numeric" /></label>
+            <label class="num-field">Displacement <input type="number" name="displacement" min="1" step="1" inputmode="numeric" /></label>
+            <p class="fineprint">Editing a length switches the preset to Custom. Values follow TradingView's built-in Ichimoku.</p>
+          </fieldset>
+        </form>
       </div>
 
       <div class="menu-view" id="menuMcb" hidden>

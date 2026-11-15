@@ -55,6 +55,13 @@
       ema21: "#c792ea",
       rsi: "#b9b9b9",
       rsiLevel: "rgba(255, 255, 255, 0.22)",
+      tenkan: "#4f8cff",
+      kijun: "#e5484d",
+      chikou: "#9ccc65",
+      spanA: "rgba(102, 187, 106, 0.85)",
+      spanB: "rgba(239, 83, 80, 0.85)",
+      cloudUp: "rgba(76, 175, 80, 0.15)",
+      cloudDown: "rgba(239, 83, 80, 0.15)",
     },
     light: {
       bg: "#fbfbfa",
@@ -76,6 +83,13 @@
       ema21: "#8a46c2",
       rsi: "#4a4a4a",
       rsiLevel: "rgba(0, 0, 0, 0.25)",
+      tenkan: "#2962ff",
+      kijun: "#b71c1c",
+      chikou: "#558b2f",
+      spanA: "rgba(56, 142, 60, 0.85)",
+      spanB: "rgba(211, 47, 47, 0.85)",
+      cloudUp: "rgba(56, 142, 60, 0.13)",
+      cloudDown: "rgba(211, 47, 47, 0.13)",
     },
   };
 
@@ -134,6 +148,99 @@
         }
       });
     }
+  }
+
+  // Ichimoku cloud: fills between Senkou A and Senkou B, green where A >= B, red where B > A.
+  // items[j] = { a, b } for logical index j (bars plus the projected future slots).
+  class CloudFill {
+    constructor() {
+      this._items = [];
+      this._colors = { up: "rgba(67,160,71,0.16)", down: "rgba(239,83,80,0.16)" };
+      this._chart = null;
+      this._series = null;
+      this._request = null;
+      const self = this;
+      this._view = { zOrder: () => "bottom", renderer: () => ({ draw: (target) => self._draw(target) }) };
+    }
+    attached({ chart, series, requestUpdate }) {
+      this._chart = chart;
+      this._series = series;
+      this._request = requestUpdate;
+    }
+    detached() {
+      this._chart = this._series = this._request = null;
+    }
+    paneViews() {
+      return [this._view];
+    }
+    updateAllViews() {}
+    setItems(items) {
+      this._items = items;
+      if (this._request) this._request();
+    }
+    setColors(colors) {
+      this._colors = colors;
+      if (this._request) this._request();
+    }
+    _draw(target) {
+      if (!this._chart || !this._series || !this._items.length) return;
+      const ts = this._chart.timeScale();
+      const range = ts.getVisibleLogicalRange();
+      if (!range) return;
+      const s = this._series;
+      const items = this._items;
+      const from = Math.max(0, Math.floor(range.from) - 1);
+      const to = Math.min(items.length - 2, Math.ceil(range.to) + 1);
+      target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+        const poly = (pts, color) => {
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(pts[0][0] * hr, pts[0][1] * vr);
+          for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0] * hr, pts[k][1] * vr);
+          ctx.closePath();
+          ctx.fill();
+        };
+        for (let j = from; j <= to; j++) {
+          const p = items[j];
+          const q = items[j + 1];
+          if (!p || !q || !Number.isFinite(p.a) || !Number.isFinite(p.b) || !Number.isFinite(q.a) || !Number.isFinite(q.b)) continue;
+          const x0 = ts.logicalToCoordinate(j);
+          const x1 = ts.logicalToCoordinate(j + 1);
+          const ya0 = s.priceToCoordinate(p.a);
+          const yb0 = s.priceToCoordinate(p.b);
+          const ya1 = s.priceToCoordinate(q.a);
+          const yb1 = s.priceToCoordinate(q.b);
+          if ([x0, x1, ya0, yb0, ya1, yb1].some((v) => v === null)) continue;
+          const d0 = p.a - p.b;
+          const d1 = q.a - q.b;
+          if (d0 * d1 >= 0) {
+            poly([[x0, ya0], [x1, ya1], [x1, yb1], [x0, yb0]], d0 + d1 >= 0 ? this._colors.up : this._colors.down);
+          } else {
+            // the spans cross inside this segment: split at the crossing
+            const t = d0 / (d0 - d1);
+            const xc = x0 + (x1 - x0) * t;
+            const yc = ya0 + (ya1 - ya0) * t;
+            poly([[x0, ya0], [xc, yc], [x0, yb0]], d0 > 0 ? this._colors.up : this._colors.down);
+            poly([[xc, yc], [x1, ya1], [x1, yb1]], d1 > 0 ? this._colors.up : this._colors.down);
+          }
+        }
+      });
+    }
+  }
+
+  // UTC time (s) of logical slot j: real bars first, then projected future candles.
+  const FIXED_STEP = { "1s": 1, "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 };
+  function slotTime(model, j) {
+    const bars = model.bars;
+    const n = bars.length;
+    if (j < n) return bars[j].time;
+    const last = bars[n - 1].time;
+    const k = j - (n - 1);
+    if (model.tf === "1M") {
+      const d = new Date(last * 1000);
+      return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + k, 1) / 1000;
+    }
+    return last + k * (FIXED_STEP[model.tf] || 60);
   }
 
   function create(container, opts) {
@@ -348,6 +455,7 @@
     let rsiGroup = null;
     let mcbGroup = null;
     let mcbParams = null;
+    let ichiGroup = null;
 
     // ---- helpers ----
     const lineOpts = (color, extra) =>
@@ -436,6 +544,97 @@
       vwap.applyOptions({ visible: !!ind.vwap });
       ema9.applyOptions({ visible: !!ind.ema });
       ema21.applyOptions({ visible: !!ind.ema });
+    }
+
+    // ---- Ichimoku (price pane) ----
+    function addIchi() {
+      if (ichiGroup) return;
+      const mk = (color, key, extra) =>
+        chart.addSeries(
+          LWC.LineSeries,
+          lineOpts(color, Object.assign({ priceFormat: priceFormat(), autoscaleInfoProvider: overlayAutoscale(key) }, extra)),
+          0,
+        );
+      const spanA = mk(t.spanA, "ichiA");
+      const spanB = mk(t.spanB, "ichiB");
+      const cloud = new CloudFill();
+      cloud.setColors({ up: t.cloudUp, down: t.cloudDown });
+      spanA.attachPrimitive(cloud);
+      const tenkan = mk(t.tenkan, "ichiT", { lineWidth: 1 });
+      const kijun = mk(t.kijun, "ichiK", { lineWidth: 2 });
+      const chikou = mk(t.chikou, "ichiC");
+      ichiGroup = { spanA, spanB, tenkan, kijun, chikou, cloud, last: {} };
+    }
+
+    function removeIchi() {
+      if (!ichiGroup) return;
+      for (const k of ["spanA", "spanB", "tenkan", "kijun", "chikou"]) chart.removeSeries(ichiGroup[k]);
+      ["ichiA", "ichiB", "ichiT", "ichiK", "ichiC"].forEach((k) => yAuto.overlays.delete(k));
+      ichiGroup = null;
+    }
+
+    function ichiSetData(model) {
+      if (!ichiGroup) return;
+      const g = ichiGroup;
+      const ich = model.ichi;
+      if (!ich || !model.bars.length) {
+        ["spanA", "spanB", "tenkan", "kijun", "chikou"].forEach((k) => g[k].setData([]));
+        g.cloud.setItems([]);
+        return;
+      }
+      const n = model.bars.length;
+      const s = ich.shift;
+      const tk = [];
+      const kj = [];
+      const a = [];
+      const b = [];
+      const ch = [];
+      const items = new Array(n + s);
+      for (let i = 0; i < n; i++) {
+        const tm = model.bars[i].time;
+        tk.push(val(tm, ich.tenkan[i]));
+        kj.push(val(tm, ich.kijun[i]));
+        const ft = slotTime(model, i + s);
+        a.push(val(ft, ich.spanA[i]));
+        b.push(val(ft, ich.spanB[i]));
+        if (i >= s) ch.push(val(model.bars[i - s].time, model.bars[i].close));
+        items[i + s] = { a: ich.spanA[i], b: ich.spanB[i] };
+      }
+      g.tenkan.setData(tk);
+      g.kijun.setData(kj);
+      g.spanA.setData(a);
+      g.spanB.setData(b);
+      g.chikou.setData(ch);
+      g.cloud.setItems(items);
+      g.last = { a: a.length ? a[a.length - 1].time : 0, c: ch.length ? ch[ch.length - 1].time : 0, n, s };
+    }
+
+    function ichiUpdate(model, from) {
+      if (!ichiGroup) return;
+      const g = ichiGroup;
+      const ich = model.ichi;
+      const n = model.bars.length;
+      if (!ich || !n) return;
+      const s = ich.shift;
+      if (g.last.s !== s || n < g.last.n) return ichiSetData(model);
+      const put = (series, key, p) => {
+        series.update(p, p.time < g.last[key]);
+        if (p.time > g.last[key]) g.last[key] = p.time;
+      };
+      for (let i = Math.max(0, from); i < n; i++) {
+        const tm = model.bars[i].time;
+        const hist = i < n - 1;
+        g.tenkan.update(val(tm, ich.tenkan[i]), hist);
+        g.kijun.update(val(tm, ich.kijun[i]), hist);
+        const ft = slotTime(model, i + s);
+        put(g.spanA, "a", val(ft, ich.spanA[i]));
+        g.spanB.update(val(ft, ich.spanB[i]), ft < g.last.a);
+        if (i >= s) put(g.chikou, "c", val(model.bars[i - s].time, model.bars[i].close));
+      }
+      g.last.n = n;
+      const items = g.cloud._items.slice(0, n + s);
+      for (let i = Math.max(0, from); i < n; i++) items[i + s] = { a: ich.spanA[i], b: ich.spanB[i] };
+      g.cloud.setItems(items);
     }
 
     // ---- RSI pane ----
@@ -604,6 +803,7 @@
       ema9.setData(idx.map((i) => val(model.bars[i].time, model.ema9[i])));
       ema21.setData(idx.map((i) => val(model.bars[i].time, model.ema21[i])));
       if (rsiGroup) rsiGroup.line.setData(idx.map((i) => val(model.bars[i].time, model.rsi[i])));
+      ichiSetData(model);
       if (mcbGroup && model.mcb) {
         const cols = {};
         MCB_KEYS.forEach((k) => (cols[k] = new Array(n)));
@@ -633,6 +833,7 @@
         }
       }
       if (mcbGroup && model.mcb) mcbGroup.band.setItems(bandItems(model));
+      ichiUpdate(model, from);
     }
 
     // ---- theme ----
@@ -658,6 +859,14 @@
       vwap.applyOptions({ color: t.vwap });
       ema9.applyOptions({ color: t.ema9 });
       ema21.applyOptions({ color: t.ema21 });
+      if (ichiGroup) {
+        ichiGroup.tenkan.applyOptions({ color: t.tenkan });
+        ichiGroup.kijun.applyOptions({ color: t.kijun });
+        ichiGroup.chikou.applyOptions({ color: t.chikou });
+        ichiGroup.spanA.applyOptions({ color: t.spanA });
+        ichiGroup.spanB.applyOptions({ color: t.spanB });
+        ichiGroup.cloud.setColors({ up: t.cloudUp, down: t.cloudDown });
+      }
       if (rsiGroup) {
         rsiGroup.line.applyOptions({ color: t.rsi });
         rsiGroup.lines.forEach((l) => l.applyOptions({ color: t.rsiLevel }));
@@ -685,6 +894,7 @@
         precision = p;
         minMove = move;
         [main, vwap, ema9, ema21].forEach((s) => s && s.applyOptions({ priceFormat: priceFormat() }));
+        if (ichiGroup) ["spanA", "spanB", "tenkan", "kijun", "chikou"].forEach((k) => ichiGroup[k].applyOptions({ priceFormat: priceFormat() }));
       },
       setChartType(type, model) {
         chartType = type;
@@ -701,6 +911,8 @@
       },
       setIndicators(ind) {
         buildOverlays(ind);
+        if (ind.ichi) addIchi();
+        else removeIchi();
         if (ind.mcb) addMcb();
         else removeMcb();
         if (ind.rsi) addRsi();

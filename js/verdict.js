@@ -97,15 +97,17 @@
   }
 
   // The chart timeframe's classic indicators: VWAP, RSI, EMA 9/21, MACD histogram, Bollinger.
-  function readClassic({ price, vwap, rsi, ema9, ema21, hist, prevHist, upper, lower }) {
+  // ichi: optional Ichimoku score in [-1, 1] (counted as a sixth factor when present)
+  function readClassic({ price, vwap, rsi, ema9, ema21, hist, prevHist, upper, lower, ichi }) {
     const f = [];
     if (!isNa(vwap)) f.push(price > vwap ? 1 : -1);
     if (!isNa(rsi)) f.push(rsi < 40 ? 1 : rsi > 60 ? -1 : 0);
     if (!isNa(ema9) && !isNa(ema21)) f.push(ema9 > ema21 ? 1 : -1);
     if (!isNa(hist) && !isNa(prevHist)) f.push(hist > 0 && hist > prevHist ? 1 : hist < 0 && hist < prevHist ? -1 : 0);
     if (!isNa(upper) && !isNa(lower)) f.push(price < lower ? 1 : price > upper ? -1 : 0);
+    if (Number.isFinite(ichi)) f.push(ichi);
     if (!f.length) return null;
-    return f.reduce((a, b) => a + b, 0) / 5;
+    return f.reduce((a, b) => a + b, 0) / Math.max(5, f.length);
   }
 
   function technical(rows, classic) {

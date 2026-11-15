@@ -26,7 +26,9 @@ A fast, single-view terminal for crypto, US stocks and commodities in real time,
 - **Trade-speed chart** — Candles move on every Binance trade (`@aggTrade`) and are reconciled against Binance's own klines, so OHLCV matches the exchange.
 - **Live order book** — Top 20 levels every 100 ms over the same WebSocket, with spread and bid/ask pressure.
 - **Market Cipher B** — Line-for-line port of the Pine Script v6 source: WaveTrend fast/slow/VWAP areas, MFI band, RSI and Stoch lines, cross dots, bottom/top signals, editable inputs, and its four alert conditions (in-app and browser notifications, on bar close).
-- **Indicators** — Volume, session VWAP (seeded from 00:00 UTC), EMA 9/21, RSI 14 in its own pane, and VPVR.
+- **Indicators** — Volume, session VWAP (seeded from 00:00 UTC), EMA 9/21, RSI 14 in its own pane, VPVR, and Ichimoku Cloud.
+- **Ichimoku Cloud** — TradingView formulas with the cloud projected ahead of price. Auto settings per market: 20 / 60 / 120 / 30 for 24/7 crypto, Hosoda's classic 9 / 26 / 52 / 26 for stocks and commodities; Crypto, Classic and Custom presets in its settings.
+- **What the indicators say** — Every enabled indicator is read in plain words on the latest bar (Signal tab), with bullish / bearish tags and short reading chips in the chart legends.
 - **Pulse verdict (Signal tab)** — Long / Short / Wait with bias, score, entry, invalidation, and a 1:2 target. Built from Market Cipher B on 5m, 15m, 1h, 4h, and 1d plus the chart's classic indicators (55%), Fear & Greed sentiment (15%), news tone (15%), and CoinGecko fundamentals (15%). Rule-based, not financial advice.
 - **Market Cipher B by timeframe** — Zone, last dot, and read for every timeframe, with the reasons in a tooltip.
 - **Market tab** — Crypto Fear & Greed Index, coin headlines from CoinDesk, Cointelegraph, Decrypt, and Bitcoin.com tagged bullish / bearish, and fundamentals (market cap, FDV, supply, distance from ATH, 7d / 30d trend).

@@ -187,3 +187,44 @@ test("heikin ashi open uses previous HA values", () => {
   assert.equal(ha[1].open, 10.5);
   assert.equal(ha[1].close, 11.5);
 });
+
+test("donchian midpoint is na until len bars, then (highest + lowest) / 2", () => {
+  const high = [5, 7, 6, 9];
+  const low = [1, 2, 3, 4];
+  sameSeries(I.donchian(high, low, 3), [NA, NA, (7 + 1) / 2, (9 + 2) / 2]);
+});
+
+test("ichimoku: lines follow the TradingView formulas and shift", () => {
+  const bars = makeBars(200);
+  const ich = I.ichimoku(bars, { tenkan: 9, kijun: 26, senkou: 52, displacement: 26 });
+  const high = bars.map((b) => b.high);
+  const low = bars.map((b) => b.low);
+  const t = I.donchian(high, low, 9);
+  const k = I.donchian(high, low, 26);
+  sameSeries(ich.tenkan, t);
+  sameSeries(ich.kijun, k);
+  sameSeries(ich.spanA, t.map((v, i) => (v + k[i]) / 2));
+  sameSeries(ich.spanB, I.donchian(high, low, 52));
+  assert.equal(ich.shift, 25);
+  assert.equal(ich.spanB.findIndex((v) => !Number.isNaN(v)), 51);
+});
+
+test("ichimoku presets: crypto 20/60/120/30, classic 9/26/52/26", () => {
+  assert.deepEqual({ ...I.ICHIMOKU_PRESETS.crypto }, { tenkan: 20, kijun: 60, senkou: 120, displacement: 30 });
+  assert.deepEqual({ ...I.ICHIMOKU_PRESETS.classic }, { tenkan: 9, kijun: 26, senkou: 52, displacement: 26 });
+});
+
+test("ichimoku read: price far above a rising market is above the cloud and bullish", () => {
+  const bars = Array.from({ length: 150 }, (_, i) => ({ time: i, open: 100 + i, high: 101 + i, low: 99 + i, close: 100.5 + i }));
+  const r = I.ichimokuRead(bars, I.ichimoku(bars));
+  assert.equal(r.ready, true);
+  assert.equal(r.position, "above");
+  assert.equal(r.tk, "bull");
+  assert.equal(r.chikou, "above");
+  assert.equal(r.futureBullish, true);
+  assert.ok(r.score > 0.9);
+  const down = bars.map((b, i) => ({ time: i, open: 300 - i, high: 301 - i, low: 299 - i, close: 299.5 - i }));
+  const d = I.ichimokuRead(down, I.ichimoku(down));
+  assert.equal(d.position, "below");
+  assert.ok(d.score < -0.9);
+});
