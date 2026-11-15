@@ -1,447 +1,502 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta
       name="description"
-      content="A professional, high-performance crypto trading terminal featuring real-time data, technical indicators, and live market insights."
+      content="A fast, single-view crypto terminal: live Binance trades, order book, and indicators including Market Cipher B."
     />
-    <meta
-      name="keywords"
-      content="crypto, terminal, trading, binance, charts, real-time, orderbook, technical analysis"
-    />
+    <meta name="theme-color" content="#0d0d0d" />
     <title>Pulse Terminal</title>
-    <link rel="icon" href="data:," />
-    <link
-      href="https://community.akamai.steamstatic.com/public/shared/css/motiva_sans.css?v=2nNdXRYqinDP"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Sans:wght@500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="fonts/satoshi-500.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="fonts/chivo-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preconnect" href="https://stream.binance.com:9443" crossorigin />
+    <link rel="preconnect" href="https://api.binance.com" crossorigin />
     <link rel="stylesheet" href="css/styles.css" />
-    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
-    <script src="https://code.iconify.design/3/3.1.0/iconify.min.js"></script>
     <script>
-      // set theme before first paint to avoid flash of wrong colors
-      var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-      document.documentElement.setAttribute("data-theme", prefersDark ? "dark" : "light");
+      // theme before first paint: saved choice, else the OS preference
+      (function () {
+        var saved = null;
+        try { saved = JSON.parse(localStorage.getItem("pulse.v2") || "{}").theme; } catch (e) {}
+        var dark = saved ? saved === "dark" : !window.matchMedia || window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+      })();
     </script>
+    <script src="https://unpkg.com/lightweight-charts@5.3.0/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body>
-    <header class="toolbar floating-nav" id="mainToolbar">
-      <div class="nav-row-primary">
-        <span
-          class="iconify drag-handle tooltip"
-          data-icon="tabler:grid-dots"
-          data-tooltip="Drag to move"
-        ></span>
+    <!--
+      THESIS: The chart owns the screen; every other element is a quiet, dense frame that reports live numbers. Refuses the floating-card dashboard with pill toggles.
+      OWN-WORLD: Flat near-black canvas (#0d0d0d), hairline #1f1f1f dividers, no shadows on chrome. Copper up candles, light-grey down candles, copper accent for state only. Inter with tabular figures. Square-ish 6px controls, segmented timeframes, in-chart text legends.
+      STORY: A trader opens it, sees price moving on every trade within a second, reads the book and Market Cipher B at a glance, and switches pairs or indicators from the keyboard.
+      FIRST VIEWPORT: 40px top bar (brand, pair tabs, search, theme) / 48px symbol bar (pair, timeframes, chart type, large price, 24h stats, Indicators, Panels) / chart filling the rest with legend top-left and MCB pane below / 312px order-book panel right / 26px status bar with feed latency.
+      FORM: Pinned by the user (openmarket.xyz chart UI); no roll. Seed key: user-pinned.
+      FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+    -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <!-- UI icons: Tabler (MIT) via Iconify, inlined so nothing loads at runtime -->
+        <symbol id="i-search" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0-14 0m18 11l-6-6"/></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m6 9l6 6l6-6"/></symbol>
+        <symbol id="i-sun" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12a4 4 0 1 0 8 0a4 4 0 1 0-8 0m-5 0h1m8-9v1m8 8h1m-9 8v1M5.6 5.6l.7.7m12.1-.7l-.7.7m0 11.4l.7.7m-12.1-.7l-.7.7"/></symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3h.393a7.5 7.5 0 0 0 7.92 12.446A9 9 0 1 1 12 2.992z"/></symbol>
+        <symbol id="i-candles" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zm2-3v2m0 5v9m4-5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1zm2-11v10m0 5v1m4-14a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1zm2-2v1m0 6v9"/></symbol>
+        <symbol id="i-ha" viewBox="0 0 24 24"><path fill="currentColor" d="M6 3a1 1 0 0 1 .993.883L7 4v1a2 2 0 0 1 1.995 1.85L9 7v3a2 2 0 0 1-1.85 1.995L7 12v8a1 1 0 0 1-1.993.117L5 20v-8a2 2 0 0 1-1.995-1.85L3 10V7a2 2 0 0 1 1.85-1.995L5 5V4a1 1 0 0 1 1-1m6 0a1 1 0 0 1 .993.883L13 4v9a2 2 0 0 1 1.995 1.85L15 15v3a2 2 0 0 1-1.85 1.995L13 20a1 1 0 0 1-1.993.117L11 20l-.15-.005a2 2 0 0 1-1.844-1.838L9 18v-3a2 2 0 0 1 1.85-1.995L11 13V4a1 1 0 0 1 1-1m6 0a1 1 0 0 1 .993.883L19 4a2 2 0 0 1 1.995 1.85L21 6v4a2 2 0 0 1-1.85 1.995L19 12v8a1 1 0 0 1-1.993.117L17 20v-8a2 2 0 0 1-1.995-1.85L15 10V6a2 2 0 0 1 1.85-1.995L17 4a1 1 0 0 1 1-1"/></symbol>
+        <symbol id="i-line" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19h16M4 15l4-6l4 2l4-5l4 4"/></symbol>
+        <symbol id="i-indicators" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 9a2 2 0 1 0 4 0a2 2 0 1 0-4 0m10-2a2 2 0 1 0 4 0a2 2 0 1 0-4 0m-5 8a2 2 0 1 0 4 0a2 2 0 1 0-4 0m-1.84-4.38l2.34 2.88m2.588-.172l2.837-4.586"/></g></symbol>
+        <symbol id="i-panel" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm11-2v16"/></symbol>
+        <symbol id="i-fit" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 4h4v4m-6 2l6-6M8 20H4v-4m0 4l6-6m6 6h4v-4m-6-2l6 6M8 4H4v4m0-4l6 6"/></symbol>
+        <symbol id="i-reset" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4m-4 4a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></symbol>
+        <symbol id="i-live" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5v14l8-7zm11 0v14l8-7z"/></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></symbol>
+        <symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0M4 6h8m4 0h4M6 12a2 2 0 1 0 4 0a2 2 0 1 0-4 0m-2 0h2m4 0h10m-5 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0M4 18h11m4 0h1"/></symbol>
+        <symbol id="i-book" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5h8m-8 4h5m-5 6h8m-8 4h5M3 5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zm0 10a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></symbol>
+        <symbol id="i-pulse" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12h4l3 8l4-16l3 8h4"/></symbol>
+        <symbol id="i-back" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m15 6l-6 6l6 6"/></symbol>
+        <symbol id="i-bell" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3H4a4 4 0 0 0 2-3v-3a7 7 0 0 1 4-6M9 17v1a3 3 0 0 0 6 0v-1"/></symbol>
+        <symbol id="i-info" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0-18 0m9-3h.01"/><path d="M11 12h1v4h1"/></g></symbol>
+        <symbol id="i-news" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 6h3a1 1 0 0 1 1 1v11a2 2 0 0 1-4 0V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v12a3 3 0 0 0 3 3h11M8 8h4m-4 4h4m-4 4h4"/></symbol>
+        <symbol id="i-help" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0-18 0m9 4v.01"/><path d="M12 13a2 2 0 0 0 .914-3.782a1.98 1.98 0 0 0-2.414.483"/></g></symbol>
+      </defs>
+    </svg>
 
-        <div class="search-container tooltip" data-tooltip="Search Tokens (/)">
-          <span
-            class="iconify"
-            data-icon="tabler:search"
-            style="color: var(--muted); font-size: 14px"
-          ></span>
-          <input type="text" id="tokenSearch" placeholder="Search" />
-          <kbd>/</kbd>
+    <div class="app" id="app" data-panel="open">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="Pulse Terminal home">
+          <span class="brand-mark"><svg class="ic"><use href="#i-pulse" /></svg></span>
+          <span class="brand-name">Pulse</span>
+        </a>
+        <nav class="pair-tabs" id="pairTabs" aria-label="Trading pairs"></nav>
+        <div class="topbar-end">
+          <button class="search-trigger" id="openPalette" type="button" aria-label="Search pairs, indicators and commands">
+            <svg class="ic"><use href="#i-search" /></svg>
+            <span class="search-label">Search pairs, indicators, commands</span>
+            <kbd id="paletteKbd">Ctrl K</kbd>
+          </button>
+          <button class="icon-btn" id="themeBtn" type="button" aria-label="Switch to light theme">
+            <svg class="ic"><use href="#i-sun" id="themeIcon" /></svg>
+          </button>
+        </div>
+      </header>
+
+      <section class="symbolbar" aria-label="Market">
+        <button class="symbol-box" id="symbolBox" type="button" aria-label="Change pair">
+          <span class="symbol-venue">Binance spot</span>
+          <span class="symbol-name">
+            <img id="symbolIcon" src="icons/coins/btc.svg" alt="" width="16" height="16" />
+            <span id="symbolText">BTC-USDT</span>
+            <svg class="ic ic-sm"><use href="#i-chevron" /></svg>
+          </span>
+        </button>
+
+        <div class="seg" id="tfSeg" role="radiogroup" aria-label="Timeframe"></div>
+
+        <div class="seg seg-icons" id="typeSeg" role="radiogroup" aria-label="Chart type">
+          <button type="button" role="radio" data-type="candlestick" aria-label="Candles" data-tip="Candles"><svg class="ic"><use href="#i-candles" /></svg></button>
+          <button type="button" role="radio" data-type="heikinAshi" aria-label="Heikin Ashi" data-tip="Heikin Ashi: averaged candles that smooth out noise. Prices shown are averages, not trades."><svg class="ic"><use href="#i-ha" /></svg></button>
+          <button type="button" role="radio" data-type="line" aria-label="Line" data-tip="Line of closing prices"><svg class="ic"><use href="#i-line" /></svg></button>
         </div>
 
-        <div class="nav-pill-group" id="pairSelector"></div>
+        <div class="quote" aria-live="off">
+          <span class="quote-price num" id="lastPrice">&ndash;</span>
+          <span class="chip num" id="changeChip" data-tip="Change versus the price 24 hours ago.">&ndash;</span>
+        </div>
 
-        <div style="flex: 1"></div>
+        <dl class="stats-inline">
+          <div data-tip="Highest price in the last 24 hours."><dt>24h high</dt><dd class="num" id="sHigh">&ndash;</dd></div>
+          <div data-tip="Lowest price in the last 24 hours."><dt>24h low</dt><dd class="num" id="sLow">&ndash;</dd></div>
+          <div data-tip="USDT traded in the last 24 hours."><dt>24h volume</dt><dd class="num" id="sQvol">&ndash;</dd></div>
+        </dl>
 
-        <div
-          id="status"
-          class="status-dot tooltip"
-          data-tooltip="WebSocket Status"
-        ></div>
-        <span
-          id="clock"
-          class="number"
-          style="font-size: 12px; color: var(--muted); white-space: nowrap"
-        ></span>
-      </div>
-
-      <div class="nav-row-secondary">
-        <div class="clean-dropdown tooltip" data-tooltip="Chart Type">
-          <button class="clean-dropdown-toggle" id="chartTypeBtn">
-            <span
-              class="iconify"
-              data-icon="tabler:chart-candles"
-              style="font-size: 14px"
-            ></span>
-            <span id="activeChartTypeText">Candles</span>
-            <span
-              class="iconify"
-              data-icon="tabler:chevron-down"
-              style="font-size: 12px; color: var(--muted)"
-            ></span>
+        <div class="symbolbar-end">
+          <button class="tool-btn" id="indicatorsBtn" type="button" aria-haspopup="true" aria-expanded="false">
+            <svg class="ic"><use href="#i-indicators" /></svg>
+            <span>Indicators</span>
+            <span class="tool-count num" id="indCount">0/6</span>
           </button>
-          <div class="clean-dropdown-menu" id="chartTypeMenu">
-            <button class="chart-type-opt" data-val="candlestick">
-              Candles
-            </button>
-            <button class="chart-type-opt" data-val="heikinAshi">
-              Heikin Ashi
-            </button>
-            <button class="chart-type-opt" data-val="line">Line</button>
+          <button class="tool-btn" id="panelBtn" type="button" aria-pressed="true">
+            <svg class="ic"><use href="#i-panel" /></svg>
+            <span>Panels</span>
+          </button>
+        </div>
+      </section>
+
+      <main class="workspace">
+        <div class="chart-area" id="chart-wrapper">
+          <div id="chart"></div>
+
+          <div class="legend" id="legendPrice">
+            <div class="legend-title">
+              <strong id="lgSymbol">BTC-USDT</strong>
+              <span id="lgMeta">1m &middot; Binance</span>
+            </div>
+            <div class="legend-row num" id="lgOhlc">
+              <span>O <b id="lgO">&ndash;</b></span>
+              <span>H <b id="lgH">&ndash;</b></span>
+              <span>L <b id="lgL">&ndash;</b></span>
+              <span>C <b id="lgC">&ndash;</b></span>
+              <b id="lgChg"></b>
+            </div>
+            <div class="legend-row num" id="lgVolRow">Vol <b id="lgV">&ndash;</b></div>
+            <div class="legend-row num" id="lgVwapRow" hidden>VWAP <b class="lg-vwap" id="lgVwap">&ndash;</b></div>
+            <div class="legend-row num" id="lgEmaRow" hidden>
+              EMA 9 <b class="lg-ema9" id="lgEma9">&ndash;</b>
+              <span class="legend-gap"></span>
+              EMA 21 <b class="lg-ema21" id="lgEma21">&ndash;</b>
+            </div>
+          </div>
+
+          <div class="legend legend-pane" id="legendMcb" hidden>
+            <div class="legend-title">
+              <strong>Market Cipher B</strong>
+              <span class="num" id="lgMcbParams">9 12 3 5 60 40 2 81 2</span>
+            </div>
+            <div class="legend-row num">
+              <span>Fast <b class="lg-fast" id="lgFast">&ndash;</b></span>
+              <span>Slow <b class="lg-slow" id="lgSlow">&ndash;</b></span>
+              <span>VWAP <b class="lg-wtv" id="lgWtv">&ndash;</b></span>
+              <span>MFI <b id="lgMf">&ndash;</b></span>
+              <span>RSI <b class="lg-rsi" id="lgMrsi">&ndash;</b></span>
+              <span>Stoch <b id="lgStoch">&ndash;</b></span>
+            </div>
+          </div>
+
+          <div class="legend legend-pane" id="legendRsi" hidden>
+            <div class="legend-title"><strong>RSI</strong><span class="num">14</span><b class="num" id="lgRsi">&ndash;</b></div>
+          </div>
+
+          <div class="chart-status" id="streamOverlay" role="status">
+            <span class="chart-status-bar" aria-hidden="true"></span>
+            <span id="streamText">Loading 1,000 bars from Binance</span>
+          </div>
+
+          <div class="chart-tools" role="toolbar" aria-label="Chart view">
+            <button class="chart-tool" id="btnLive" type="button" aria-label="Jump to latest bar" data-tip="Jump to latest bar"><svg class="ic"><use href="#i-live" /></svg></button>
+            <button class="chart-tool" id="btnFit" type="button" aria-label="Fit all bars" data-tip="Fit all bars"><svg class="ic"><use href="#i-fit" /></svg></button>
+            <button class="chart-tool" id="btnReset" type="button" aria-label="Reset view" data-tip="Reset zoom and scales"><svg class="ic"><use href="#i-reset" /></svg></button>
           </div>
         </div>
 
-        <div class="clean-dropdown tooltip" data-tooltip="Timeframe">
-          <button class="clean-dropdown-toggle" id="timeframeBtn">
-            <span
-              class="iconify"
-              data-icon="tabler:clock"
-              style="font-size: 14px"
-            ></span>
-            <span id="activeTimeframeText">1s</span>
-            <span
-              class="iconify"
-              data-icon="tabler:chevron-down"
-              style="font-size: 12px; color: var(--muted)"
-            ></span>
-          </button>
-          <div class="clean-dropdown-menu" id="timeframeMenu">
-            <button class="tf-opt" data-val="1s">1s</button>
-            <button class="tf-opt" data-val="1m">1 min</button>
-            <button class="tf-opt" data-val="3m">3 min</button>
-            <button class="tf-opt" data-val="5m">5 min</button>
-            <button class="tf-opt" data-val="15m">15 min</button>
-            <button class="tf-opt" data-val="30m">30 min</button>
+        <aside class="panel" id="panel" aria-label="Market panels">
+          <div class="panel-tabs" role="tablist" aria-label="Panels">
+            <button type="button" role="tab" id="tab-book" aria-controls="view-book" aria-selected="true" data-tab="book">Order book</button>
+            <button type="button" role="tab" id="tab-signal" aria-controls="view-signal" aria-selected="false" data-tab="signal">Signal</button>
+            <button type="button" role="tab" id="tab-market" aria-controls="view-market" aria-selected="false" data-tab="market">Market</button>
+            <button type="button" class="panel-close icon-btn" id="panelClose" aria-label="Close panel"><svg class="ic"><use href="#i-x" /></svg></button>
           </div>
-        </div>
 
-        <div class="divider"></div>
-
-        <span
-          style="
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            white-space: nowrap;
-          "
-          >Indicators</span
-        >
-        <button
-          class="btn tooltip"
-          id="btn-vwap"
-          data-tooltip="Volume Weighted Avg Price"
-        >
-          VWAP
-        </button>
-        <button
-          class="btn tooltip"
-          id="btn-ema"
-          data-tooltip="Exp. Moving Averages"
-        >
-          EMA
-        </button>
-        <button
-          class="btn tooltip"
-          id="btn-rsi"
-          data-tooltip="Relative Strength Index"
-        >
-          RSI
-        </button>
-        <button
-          class="btn tooltip"
-          id="btn-vol"
-          data-tooltip="Volume Histogram"
-        >
-          Vol
-        </button>
-        <button
-          class="btn tooltip"
-          id="btn-vpvr"
-          data-tooltip="Volume Profile (Visible Range)"
-        >
-          VPVR
-        </button>
-        <div class="clean-dropdown tooltip" data-tooltip="VPVR Settings">
-          <button class="clean-dropdown-toggle" id="vpvrSettingsBtn">
-            <span
-              class="iconify"
-              data-icon="tabler:adjustments"
-              style="font-size: 14px"
-            ></span>
-            <span
-              class="iconify"
-              data-icon="tabler:chevron-down"
-              style="font-size: 12px; color: var(--muted)"
-            ></span>
-          </button>
-          <div class="clean-dropdown-menu vpvr-menu" id="vpvrMenu">
-            <div class="vpvr-field">
-              <span class="vpvr-label">Display</span>
-              <div class="vpvr-seg" id="vpvrMode">
-                <button data-mode="total" class="active">Total</button>
-                <button data-mode="buysell">B/S</button>
-                <button data-mode="delta">Delta</button>
+          <section class="panel-view" id="view-book" role="tabpanel" aria-labelledby="tab-book">
+            <div class="book">
+              <div class="book-head">
+                <span data-tip="Limit order price in USDT. Red rows are asks (sellers), copper rows are bids (buyers).">Price <em>(USDT)</em></span>
+                <span data-tip="Amount waiting at this price level.">Size <em id="bookBase">(BTC)</em></span>
+                <span data-tip="Running total from the best price outward. The shaded bar shows it.">Total</span>
+              </div>
+              <div class="book-side book-asks" id="bookAsks"></div>
+              <div class="book-mid">
+                <span class="book-mid-price num" id="bookMid" data-tip="Mid price: halfway between the best bid and the best ask.">&ndash;</span>
+                <span class="book-spread num" id="bookSpread" data-tip="Gap between the best ask and best bid. bps = hundredths of a percent.">Spread &ndash;</span>
+              </div>
+              <div class="book-side book-bids" id="bookBids"></div>
+              <div class="book-pressure" data-tip="Share of size on each side across the top 20 levels. Updates every 100 ms.">
+                <span class="num" id="pressBidTxt">Bids &ndash;</span>
+                <div class="pressure-track"><span class="pressure-bid" id="pressBid"></span></div>
+                <span class="num" id="pressAskTxt">&ndash; Asks</span>
               </div>
             </div>
-            <div class="vpvr-field">
-              <span class="vpvr-label">Rows <em id="vpvrRowsVal">24</em></span>
-              <input type="range" id="vpvrRows" min="10" max="50" step="1" value="24" />
-            </div>
-            <div class="vpvr-field">
-              <span class="vpvr-label"
-                >Value Area <em id="vpvrVaVal">70</em>%</span
-              >
-              <input type="range" id="vpvrVa" min="50" max="90" step="1" value="70" />
-            </div>
-            <div class="vpvr-field">
-              <span class="vpvr-label">Width <em id="vpvrWidthVal">130</em></span>
-              <input type="range" id="vpvrWidth" min="60" max="220" step="10" value="130" />
-            </div>
-            <div class="vpvr-toggles">
-              <label><input type="checkbox" id="vpvrPOC" checked /> POC line</label>
-              <label><input type="checkbox" id="vpvrVAHVAL" checked /> VAH/VAL</label>
-              <label><input type="checkbox" id="vpvrVAHL" checked /> VA shade</label>
-            </div>
-          </div>
-        </div>
 
-        <div style="flex: 1"></div>
+            <div class="panel-section">
+              <h2 class="section-title">24h</h2>
+              <dl class="stat-grid">
+                <div data-tip="Highest trade price in the last 24 hours."><dt>High</dt><dd class="num" id="st-high">&ndash;</dd></div>
+                <div data-tip="Lowest trade price in the last 24 hours."><dt>Low</dt><dd class="num" id="st-low">&ndash;</dd></div>
+                <div data-tip="Price 24 hours ago."><dt>Open</dt><dd class="num" id="st-open">&ndash;</dd></div>
+                <div data-tip="Number of trades in the last 24 hours."><dt>Trades</dt><dd class="num" id="st-trades">&ndash;</dd></div>
+                <div data-tip="Coins traded in the last 24 hours."><dt>Volume</dt><dd class="num" id="st-vol">&ndash;</dd></div>
+                <div data-tip="USDT traded in the last 24 hours."><dt>Quote volume</dt><dd class="num" id="st-qvol">&ndash;</dd></div>
+              </dl>
+            </div>
+          </section>
 
-        <button class="btn tooltip" id="btn-theme" data-tooltip="Toggle Theme">
-          <span
-            class="iconify"
-            id="theme-icon"
-            data-icon="tabler:moon"
-            style="font-size: 15px"
-          ></span>
-        </button>
+          <section class="panel-view" id="view-signal" role="tabpanel" aria-labelledby="tab-signal" hidden>
+            <div class="panel-section verdict" id="verdict">
+              <div class="summary-head">
+                <h2 class="section-title" data-tip="Pulse verdict combines Technical (55%), Sentiment (15%), News (15%) and Fundamentals (15%). Technical is mostly Market Cipher B across 1m to 1y.">Pulse verdict</h2>
+                <span class="summary-risk" id="vdAgree" data-tip="How many of the four parts point the same way as the overall score.">&ndash;</span>
+              </div>
 
-        <div class="divider"></div>
+              <div class="verdict-hero" id="vdHero" data-tone="flat">
+                <span class="verdict-action" id="vdAction">Loading</span>
+                <span class="verdict-side">
+                  <span class="verdict-bias" id="vdBias">&ndash;</span>
+                  <span class="verdict-score num" id="vdScore" data-tip="Overall score from -100 (bearish) to +100 (bullish). Long needs +25 or more, Short needs -25 or less.">&ndash;</span>
+                </span>
+              </div>
+              <p class="verdict-summary" id="vdNote">Reading the market&hellip;</p>
 
-        <button
-          class="btn tooltip"
-          id="btn-insights"
-          data-tooltip="Live Insights"
-        >
-          <span
-            class="iconify"
-            data-icon="tabler:brain"
-            style="font-size: 14px"
-          ></span>
-          Insights
-        </button>
-      </div>
-    </header>
-    <div class="main-container">
-      <div class="chart-container">
-        <div id="chart-wrapper">
-          <div class="ghost-watermark" id="ghostWatermark">PULSE</div>
-          <div id="chart"></div>
-          <div class="stream-overlay" id="streamOverlay">
-            <span
-              class="iconify"
-              data-icon="svg-spinners:180-ring"
-              style="font-size: 28px"
-            ></span>
-            <span>Connecting to stream&hellip;</span>
-          </div>
-          <div class="chart-actions">
-            <button
-              class="chart-action-btn tooltip"
-              id="btn-fit"
-              data-tooltip="Fit Chart"
-            >
-              <span class="iconify" data-icon="tabler:arrows-maximize"></span>
-            </button>
-            <button
-              class="chart-action-btn tooltip"
-              id="btn-reset"
-              data-tooltip="Reset View"
-            >
-              <span class="iconify" data-icon="tabler:refresh"></span>
-            </button>
-          </div>
-          <div id="readout" class="readout">
-            <div>
-              <span>O:</span> <span class="val number" id="r-o">-</span>
-            </div>
-            <div>
-              <span>H:</span> <span class="val number" id="r-h">-</span>
-            </div>
-            <div>
-              <span>L:</span> <span class="val number" id="r-l">-</span>
-            </div>
-            <div>
-              <span>C:</span> <span class="val number" id="r-c">-</span>
-            </div>
-            <div>
-              <span>Vol:</span> <span class="val number" id="r-v">-</span>
-            </div>
-            <div>
-              <span>VWAP:</span> <span class="val number" id="r-vwap">-</span>
-            </div>
-            <div>
-              <span>RSI:</span> <span class="val number" id="r-rsi">-</span>
-            </div>
-          </div>
-        </div>
-      </div>
+              <div class="score-scale" aria-hidden="true">
+                <span class="score-zone score-zone-short"></span>
+                <span class="score-zone score-zone-long"></span>
+                <span class="score-mark" id="vdMark"></span>
+              </div>
+              <div class="score-legend"><span>Short</span><span>Wait</span><span>Long</span></div>
 
-      <aside class="sidebar">
-        <div class="sidebar-section">
-          <div class="sidebar-title">Spot Price</div>
-          <div class="price-widget">
-            <div class="price-label">Current</div>
-            <div class="price-value number" id="livePrice">-</div>
-            <div class="price-change number" id="priceChange">-</div>
-          </div>
-        </div>
+              <ul class="part-list" id="vdParts">
+                <li data-part="technical" data-tip="Market Cipher B on 1m to 1y (80%) plus VWAP, RSI, EMA, MACD and Bollinger on the chart timeframe (20%)."><span>Technical</span><span class="part-bar"><i></i></span><b class="num">&ndash;</b></li>
+                <li data-part="sentiment" data-tip="Crypto Fear &amp; Greed Index from alternative.me. 0 = extreme fear, 100 = extreme greed."><span>Sentiment</span><span class="part-bar"><i></i></span><b class="num">&ndash;</b></li>
+                <li data-part="news" data-tip="Average tone of the last 24 hours of headlines for this coin (keyword-based)."><span>News</span><span class="part-bar"><i></i></span><b class="num">&ndash;</b></li>
+                <li data-part="fundamentals" data-tip="CoinGecko data: 30-day and 7-day trend, plus supply dilution (market cap vs fully diluted value)."><span>Fundamentals</span><span class="part-bar"><i></i></span><b class="num">&ndash;</b></li>
+              </ul>
 
-        <div class="sidebar-section">
-          <div class="sidebar-title">
-            <span class="iconify" data-icon="tabler:book"></span> Orderbook
-            Sentiment
-          </div>
-          <div class="card" id="orderbookWidget">
-            <div class="loading">
-              <span
-                class="iconify"
-                data-icon="svg-spinners:180-ring"
-                style="font-size: 24px; color: var(--muted); margin-bottom: 8px"
-              ></span>
-              Analyzing depth...
+              <dl class="levels" id="vdLevels">
+                <div data-tip="Price now, on the chart timeframe."><dt>Entry</dt><dd class="num" id="vdEntry">&ndash;</dd></div>
+                <div data-tip="The idea is wrong if price passes this level: the low (Long) or high (Short) of the last 20 bars."><dt>Invalidation</dt><dd class="num lv-stop" id="vdStop">&ndash;</dd></div>
+                <div data-tip="Twice the distance from entry to invalidation (1:2 reward to risk)."><dt>Target 1:2</dt><dd class="num lv-target" id="vdTarget">&ndash;</dd></div>
+              </dl>
+              <p class="levels-empty" id="vdNoLevels">Entry, invalidation and target appear when the verdict is Long or Short.</p>
+              <p class="fineprint">Rule-based, recalculated live. A reading of indicators, not financial advice.</p>
             </div>
-          </div>
-        </div>
 
-        <div class="sidebar-section">
-          <div class="sidebar-title">
-            <span class="iconify" data-icon="tabler:activity"></span> Technical
-            Signals
-          </div>
-          <div class="card" id="signalsWidget">
-            <div class="loading">
-              <span
-                class="iconify"
-                data-icon="svg-spinners:180-ring"
-                style="font-size: 24px; color: var(--muted); margin-bottom: 8px"
-              ></span>
-              Computing indicators...
+            <div class="panel-section">
+              <div class="summary-head">
+                <h2 class="section-title" data-tip="Market Cipher B read on each timeframe from its latest bar. Hover a row for the reasons.">Timeframes</h2>
+                <span class="summary-risk num" id="tfTally">&ndash;</span>
+              </div>
+              <div class="tf-head" aria-hidden="true">
+                <span>TF</span>
+                <span data-tip="WaveTrend fast line from -100 to +100. Left shade = oversold (below -60), right shade = overbought (above 60).">Wave</span>
+                <span data-tip="Most recent dot in the last 12 bars. Small dot = cross, big dot = the script's bottom / top signal.">Last dot</span>
+                <span data-tip="Long, Short or Wait for this timeframe.">Read</span>
+              </div>
+              <ol class="tf-list" id="tfRows"></ol>
+              <p class="tf-key">
+                <span><i class="dot dot-g"></i>cross up</span>
+                <span><i class="dot dot-r"></i>cross down</span>
+                <span><i class="dot dot-G"></i>buy signal</span>
+                <span><i class="dot dot-R"></i>sell signal</span>
+                <span><i class="tf-chart-key"></i>chart</span>
+              </p>
             </div>
-          </div>
-        </div>
 
-        <div class="sidebar-section">
-          <div class="sidebar-title">
-            <span class="iconify" data-icon="tabler:chart-bar"></span> 24h Stats
-          </div>
-          <div class="stats-grid" id="statsWidget">
-            <div class="stat-item">
-              <div class="stat-label">High</div>
-              <div class="stat-value" id="stat-high">&ndash;</div>
+            <div class="panel-section summary">
+              <div class="summary-head">
+                <h2 class="section-title" data-tip="Five classic indicators on the chart timeframe's live bar, 20 points each.">Chart timeframe</h2>
+                <span class="summary-risk" id="sumRisk">&ndash;</span>
+              </div>
+              <div class="summary-bias">
+                <span class="bias-word" id="sumBias">Waiting for data</span>
+                <span class="bias-conf num" id="sumConf"></span>
+              </div>
+              <div class="conf-track" aria-hidden="true"><span id="sumConfBar"></span></div>
+              <ul class="factor-list" id="sumFactors"></ul>
             </div>
-            <div class="stat-item">
-              <div class="stat-label">Low</div>
-              <div class="stat-value" id="stat-low">&ndash;</div>
+
+            <div class="panel-section">
+              <h2 class="section-title">Signals</h2>
+              <ul class="signal-list">
+                <li data-tip="RSI 14: below 30 is oversold, above 70 is overbought."><span class="sig-name">RSI 14</span><span class="sig-val num" id="sgRsiVal">&ndash;</span><span class="tag" id="sgRsi">&ndash;</span></li>
+                <li data-tip="EMA 9 minus EMA 21. Positive = short-term trend above the longer one."><span class="sig-name">EMA 9 / 21</span><span class="sig-val num" id="sgEmaVal">&ndash;</span><span class="tag" id="sgEma">&ndash;</span></li>
+                <li data-tip="Session VWAP: average price weighted by volume since 00:00 UTC."><span class="sig-name">VWAP</span><span class="sig-val num" id="sgVwapVal">&ndash;</span><span class="tag" id="sgVwap">&ndash;</span></li>
+                <li data-tip="Market Cipher B fast wave value and its last cross on the chart timeframe."><span class="sig-name">WaveTrend</span><span class="sig-val num" id="sgWtVal">&ndash;</span><span class="tag" id="sgWt">&ndash;</span></li>
+              </ul>
             </div>
-            <div class="stat-item">
-              <div class="stat-label">Volume</div>
-              <div class="stat-value" id="stat-vol">&ndash;</div>
+
+            <div class="panel-section">
+              <h2 class="section-title">Order book pressure</h2>
+              <p class="insight-text" id="inBook">Waiting for depth data</p>
+              <p class="insight-meta num" id="inBookMeta"></p>
             </div>
-            <div class="stat-item">
-              <div class="stat-label">Trades</div>
-              <div class="stat-value" id="stat-trades">&ndash;</div>
+
+            <div class="panel-section">
+              <h2 class="section-title">Activity</h2>
+              <div class="meter" aria-hidden="true"><span id="inVolBar"></span></div>
+              <p class="insight-text" id="inVol">Waiting for data</p>
+              <p class="insight-meta num" id="inVolMeta"></p>
             </div>
-            <div class="stat-item">
-              <div class="stat-label">24h Open</div>
-              <div class="stat-value" id="stat-open">&ndash;</div>
+
+            <div class="panel-section">
+              <h2 class="section-title" data-tip="MACD 12/26/9 histogram: above zero = bullish momentum, rising = strengthening.">Momentum <em>MACD 12/26/9</em></h2>
+              <p class="insight-text" id="inMacd">Waiting for data</p>
+              <p class="insight-meta num" id="inMacdMeta"></p>
             </div>
-            <div class="stat-item">
-              <div class="stat-label">Quote Vol</div>
-              <div class="stat-value" id="stat-qvol">&ndash;</div>
+
+            <div class="panel-section">
+              <h2 class="section-title" data-tip="Bollinger Bands 20, 2: bands two standard deviations around the 20-bar average.">Volatility <em>Bollinger 20, 2</em></h2>
+              <p class="insight-text" id="inBb">Waiting for data</p>
+              <p class="insight-meta num" id="inBbMeta"></p>
             </div>
-          </div>
-        </div>
-      </aside>
+          </section>
+
+          <section class="panel-view" id="view-market" role="tabpanel" aria-labelledby="tab-market" hidden>
+            <div class="panel-section">
+              <div class="summary-head">
+                <h2 class="section-title" data-tip="Crypto Fear &amp; Greed Index (alternative.me), updated daily. Built from volatility, momentum, social media, dominance and trends.">Sentiment</h2>
+                <span class="summary-risk" id="fgUpdated">&ndash;</span>
+              </div>
+              <div class="fg">
+                <span class="fg-value num" id="fgValue">&ndash;</span>
+                <span class="fg-label" id="fgLabel">Loading</span>
+              </div>
+              <div class="fg-scale" aria-hidden="true"><span class="score-mark" id="fgMark"></span></div>
+              <div class="score-legend"><span>Extreme fear</span><span>Extreme greed</span></div>
+              <div class="fg-history num" id="fgHistory" data-tip="Last 7 days, oldest on the left."></div>
+            </div>
+
+            <div class="panel-section">
+              <div class="summary-head">
+                <h2 class="section-title" data-tip="Headlines from CoinDesk, Cointelegraph, Decrypt and Bitcoin.com. Tags come from keyword scoring, not from reading the full article.">News</h2>
+                <span class="summary-risk num" id="newsTally">&ndash;</span>
+              </div>
+              <ul class="news-list" id="newsList"><li class="news-empty">Loading headlines</li></ul>
+            </div>
+
+            <div class="panel-section">
+              <div class="summary-head">
+                <h2 class="section-title" data-tip="Market data from CoinGecko, refreshed every 5 minutes.">Fundamentals</h2>
+                <span class="summary-risk" id="fdRank">&ndash;</span>
+              </div>
+              <dl class="stat-grid" id="fdGrid">
+                <div data-tip="Price times circulating supply."><dt>Market cap</dt><dd class="num" id="fdMcap">&ndash;</dd></div>
+                <div data-tip="Price times maximum supply. A big gap to market cap means more coins can still enter circulation."><dt>Fully diluted</dt><dd class="num" id="fdFdv">&ndash;</dd></div>
+                <div data-tip="24h trading volume as a share of market cap. Higher = more active trading."><dt>Volume / cap</dt><dd class="num" id="fdTurnover">&ndash;</dd></div>
+                <div data-tip="Coins in circulation as a share of the maximum supply."><dt>Circulating</dt><dd class="num" id="fdSupply">&ndash;</dd></div>
+                <div data-tip="How far the price is below its all-time high."><dt>From ATH</dt><dd class="num" id="fdAth">&ndash;</dd></div>
+                <div data-tip="Price change over 7 days and 30 days."><dt>7d / 30d</dt><dd class="num" id="fdTrend">&ndash;</dd></div>
+              </dl>
+            </div>
+          </section>
+        </aside>
+      </main>
+
+      <footer class="statusbar">
+        <span class="conn" id="connState" data-state="connecting" data-tip="WebSocket connection to Binance."><i class="conn-dot"></i><span id="connText">Connecting</span></span>
+        <span class="status-item num" id="latency" data-tip="Time from a trade on Binance to this browser, smoothed.">Feed &ndash; ms</span>
+        <span class="status-item num" id="tps" data-tip="Trades received in the last second.">&ndash; trades/s</span>
+        <span class="status-item status-src">Binance spot, public data</span>
+        <span class="status-spacer"></span>
+        <span class="status-item num" id="utcClock" data-tip="Binance server time (UTC).">&ndash; UTC</span>
+        <button type="button" class="icon-btn status-about" id="aboutBtn" aria-haspopup="dialog" aria-expanded="false" aria-label="About and data sources"><svg class="ic"><use href="#i-info" /></svg></button>
+      </footer>
+
+      <nav class="mobile-nav" aria-label="Views">
+        <button type="button" data-view="chart" aria-pressed="true"><svg class="ic"><use href="#i-candles" /></svg><span>Chart</span></button>
+        <button type="button" data-view="book" aria-pressed="false"><svg class="ic"><use href="#i-book" /></svg><span>Book</span></button>
+        <button type="button" data-view="signal" aria-pressed="false"><svg class="ic"><use href="#i-pulse" /></svg><span>Signal</span></button>
+        <button type="button" data-view="market" aria-pressed="false"><svg class="ic"><use href="#i-news" /></svg><span>Market</span></button>
+        <button type="button" data-view="indicators" aria-pressed="false"><svg class="ic"><use href="#i-indicators" /></svg><span>Indicators</span></button>
+      </nav>
     </div>
 
-    <div id="liveInsightsPanel" class="hidden">
-      <div class="li-header">
-        <span class="li-header-title">Live Insights</span>
-        <button class="li-close-btn" id="li-close-btn">
-          <span class="iconify" data-icon="tabler:x"></span>
-        </button>
+    <!-- About popover -->
+    <div class="about" id="aboutPop" role="dialog" aria-label="About Pulse Terminal" hidden>
+      <h2>Pulse Terminal</h2>
+      <p>Live market data from Binance's public API. Sentiment from alternative.me, fundamentals from CoinGecko, headlines from CoinDesk, Cointelegraph, Decrypt and Bitcoin.com.</p>
+      <p>Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts.</p>
+      <p class="fineprint">Frontend terminal. It never places trades or asks for keys. Signals are rule-based readings, not financial advice.</p>
+    </div>
+
+    <!-- Indicators menu -->
+    <div class="menu" id="indMenu" role="dialog" aria-label="Indicators" hidden>
+      <div class="menu-view" id="menuMain">
+        <div class="menu-head"><span>Indicators</span></div>
+        <ul class="ind-list" id="indList"></ul>
       </div>
-      <div class="li-feed" id="liFeed" style="display: block; padding: 16px;">
-        <div class="li-card ai-card" style="margin-bottom: 0;">
-          <div class="li-card-label" style="color: var(--binance-yellow); margin-bottom: 12px;">
-            <span class="iconify" data-icon="tabler:cpu" style="font-size: 14px; margin-right: 4px;"></span>
-            AI Trading Analysis
-          </div>
-          <div style="font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--ink);" id="aiBias"><span class="iconify" data-icon="tabler:target" style="margin-right: 4px; vertical-align: text-bottom;"></span>Bias: NEUTRAL</div>
-          <div style="font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--muted);" id="aiRisk"><span class="iconify" data-icon="tabler:alert-triangle" style="margin-right: 4px; vertical-align: text-bottom;"></span>Risk Level: Medium (Confidence: 0%)</div>
-          <div style="font-size: 13px; color: var(--body); line-height: 1.6; margin-bottom: 16px;" id="aiReason"><span class="iconify" data-icon="tabler:bulb" style="margin-right: 4px; vertical-align: text-bottom;"></span>Reason: Analyzing data...</div>
-          <div style="font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 8px;"><span class="iconify" data-icon="tabler:bolt" style="margin-right: 4px; vertical-align: text-bottom;"></span>Key Levels:</div>
-          <div style="display: flex; gap: 12px; font-family: var(--font-num); font-size: 12px;">
-            <div style="flex: 1; padding: 8px; background: var(--surface-strong); border-radius: 6px;">
-              <div style="color: var(--muted); font-size: 10px; text-transform: uppercase;">Entry Zone</div>
-              <div id="aiEntry" style="color: var(--ink); font-weight: 600;">0.00</div>
-            </div>
-            <div style="flex: 1; padding: 8px; background: rgba(246, 70, 93, 0.1); border-radius: 6px;">
-              <div style="color: var(--trading-down); font-size: 10px; text-transform: uppercase;">Invalidation</div>
-              <div id="aiStop" style="color: var(--trading-down); font-weight: 600;">0.00</div>
-            </div>
-            <div style="flex: 1; padding: 8px; background: rgba(14, 203, 129, 0.1); border-radius: 6px;">
-              <div style="color: var(--trading-up); font-size: 10px; text-transform: uppercase;">Take Profit</div>
-              <div id="aiTarget" style="color: var(--trading-up); font-weight: 600;">0.00</div>
+
+      <div class="menu-view" id="menuVpvr" hidden>
+        <div class="menu-head">
+          <button type="button" class="icon-btn menu-back" data-back aria-label="Back"><svg class="ic"><use href="#i-back" /></svg></button>
+          <span>VPVR</span>
+        </div>
+        <div class="form">
+          <div class="field">
+            <span class="field-label">Display</span>
+            <div class="seg seg-fill" id="vpvrMode" role="radiogroup" aria-label="VPVR display">
+              <button type="button" role="radio" data-mode="total">Total</button>
+              <button type="button" role="radio" data-mode="buysell">Buy/sell</button>
+              <button type="button" role="radio" data-mode="delta">Delta</button>
             </div>
           </div>
+          <label class="field"><span class="field-label">Rows <output id="vpvrRowsVal" class="num">24</output></span><input type="range" id="vpvrRows" min="10" max="50" step="1" value="24" /></label>
+          <label class="field"><span class="field-label">Value area <output id="vpvrVaVal" class="num">70%</output></span><input type="range" id="vpvrVa" min="50" max="90" step="1" value="70" /></label>
+          <label class="field"><span class="field-label">Width <output id="vpvrWidthVal" class="num">130 px</output></span><input type="range" id="vpvrWidth" min="60" max="220" step="10" value="130" /></label>
+          <label class="check"><input type="checkbox" id="vpvrPOC" checked /> POC line</label>
+          <label class="check"><input type="checkbox" id="vpvrVAHVAL" checked /> VAH / VAL lines</label>
+          <label class="check"><input type="checkbox" id="vpvrVAHL" checked /> Value area shade</label>
         </div>
+      </div>
 
-        <div class="li-card" id="li-card-ob">
-          <div class="li-card-label">Orderbook (Buyers vs Sellers)</div>
-          <div class="li-ob-bars" id="liObBars"></div>
-          <div class="li-card-text" id="liObText">Waiting for depth data...</div>
-          <div class="li-card-meta">
-            <span class="li-tag">DEPTH</span>
-            <span id="liObMeta">&ndash;</span>
-          </div>
+      <div class="menu-view" id="menuMcb" hidden>
+        <div class="menu-head">
+          <button type="button" class="icon-btn menu-back" data-back aria-label="Back"><svg class="ic"><use href="#i-back" /></svg></button>
+          <span>Market Cipher B</span>
         </div>
-
-        <div class="li-card" id="li-card-whale">
-          <div class="li-card-label whale">Trading Activity</div>
-          <div class="li-vol-bar-wrap">
-            <div class="li-vol-bar" id="liVolBar"></div>
-          </div>
-          <div class="li-card-text" id="liWhaleText">Monitoring volume...</div>
-          <div class="li-card-meta">
-            <span class="li-tag" id="liWhaleTf">20-bar avg</span>
-            <span id="liWhaleMeta">&ndash;</span>
-          </div>
-        </div>
-
-        <div class="li-card" id="li-card-macd">
-          <div class="li-card-label macd">Momentum (MACD)</div>
-          <div class="li-card-text" id="liMacdText">Waiting for data...</div>
-          <div class="li-card-meta">
-            <span class="li-tag" id="liMacdTf">12/26/9</span>
-            <span id="liMacdMeta">&ndash;</span>
-          </div>
-        </div>
-
-        <div class="li-card" id="li-card-bb">
-          <div class="li-card-label bb">Volatility (Bollinger)</div>
-          <div class="li-card-text" id="liBbText">Waiting for data...</div>
-          <div class="li-card-meta">
-            <span class="li-tag" id="liBbTf">20-bar, 2 SD</span>
-            <span id="liBbMeta">&ndash;</span>
-          </div>
-        </div>
+        <form class="form" id="mcbForm" novalidate>
+        <details class="howto" open>
+          <summary>How Market Cipher B works</summary>
+          <ul class="howto-list">
+            <li><i class="sw sw-fast"></i><b>Fast wave</b> (light blue) and <i class="sw sw-slow"></i><b>Slow wave</b> (blue): WaveTrend momentum. Fast above slow = momentum turning up.</li>
+            <li><i class="sw sw-wtv"></i><b>VWAP</b> (yellow): the gap between fast and slow. Above zero = fast is leading upward. Not the price VWAP.</li>
+            <li><i class="sw sw-mfi"></i><b>MFI</b> (green / red area and the band at the bottom): money flow. Green = buying pressure, red = selling pressure.</li>
+            <li><i class="sw sw-rsi"></i><b>RSI</b> (pink) and <i class="sw sw-stoch"></i><b>Stoch</b> (green or red): stochastic lines. Stoch is green when it is below the pink line.</li>
+            <li><b>Levels</b>: 60 / -60 (solid) mark overbought / oversold, 53 / -53 (dotted) are early triggers, 100 marks the top.</li>
+            <li><i class="dot dot-g"></i><b>Small green dot</b>: fast crosses above slow. <i class="dot dot-r"></i><b>Small red dot</b>: fast crosses below slow.</li>
+            <li><i class="dot dot-G"></i><b>Big green dot</b> at the bottom: a cross up while fast is below -60 (oversold buy signal). <i class="dot dot-R"></i><b>Big red dot</b> at the top: a cross down while fast is above 72 (overbought sell signal).</li>
+          </ul>
+        </details>
+          <fieldset>
+            <legend>Signals</legend>
+            <label class="check"><input type="checkbox" name="showBuySignal" /> Buy Signal (Green Dot)</label>
+            <label class="check"><input type="checkbox" name="showSellSignal" /> Sell Signal (Red dot)</label>
+          </fieldset>
+          <fieldset>
+            <legend>WaveTrend</legend>
+            <label class="num-field">EMA Channel Length <input type="number" name="wt_emaLen" min="1" step="1" inputmode="numeric" /></label>
+            <label class="num-field">EMA Average Length <input type="number" name="wt_avgLen" min="1" step="1" inputmode="numeric" /></label>
+            <label class="num-field">SMA Signal Length <input type="number" name="wt_maLen" min="1" step="1" inputmode="numeric" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>MFI</legend>
+            <label class="num-field">SMA Smoothing Length <input type="number" name="mfi_smaLen" min="1" step="1" inputmode="numeric" /></label>
+            <label class="num-field">Signal Length <input type="number" name="mfi_signLen" min="1" step="1" inputmode="numeric" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>RSI / Stochastic</legend>
+            <label class="num-field">RSI Stoch Length <input type="number" name="rsi_len" min="1" step="1" inputmode="numeric" /></label>
+            <label class="num-field">RSI Smooth (K) <input type="number" name="rsi_k" min="1" step="1" inputmode="numeric" /></label>
+            <label class="num-field">Stoch Length <input type="number" name="stoch_len" min="1" step="1" inputmode="numeric" /></label>
+            <label class="num-field">Stoch Smooth (K) <input type="number" name="stoch_k" min="1" step="1" inputmode="numeric" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>Alerts</legend>
+            <label class="check"><input type="checkbox" name="alertsInApp" /> Show alerts in the terminal</label>
+            <label class="check"><input type="checkbox" name="alertsNotify" /> Browser notifications</label>
+            <p class="fineprint">Alerts fire once per closed bar for the script's four alert conditions.</p>
+          </fieldset>
+          <button type="button" class="text-btn" id="mcbReset">Reset to script defaults</button>
+        </form>
       </div>
     </div>
 
+    <!-- Command palette -->
+    <dialog class="palette" id="palette" aria-label="Command palette">
+      <div class="palette-input">
+        <svg class="ic"><use href="#i-search" /></svg>
+        <input type="text" id="paletteInput" placeholder="Search pairs, timeframes, indicators" autocomplete="off" spellcheck="false" aria-controls="paletteList" aria-autocomplete="list" role="combobox" aria-expanded="true" />
+        <kbd>Esc</kbd>
+      </div>
+      <ul class="palette-list" id="paletteList" role="listbox" aria-label="Results"></ul>
+    </dialog>
+
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+
+    <script src="js/indicators.js"></script>
+    <script src="js/feed.js"></script>
+    <script src="js/chart.js"></script>
+    <script src="js/verdict.js"></script>
+    <script src="js/market.js"></script>
+    <div class="tip" id="tip" role="tooltip" hidden></div>
     <script src="js/vpvr.js"></script>
     <script src="js/vpvr-view.js"></script>
     <script src="js/app.js"></script>

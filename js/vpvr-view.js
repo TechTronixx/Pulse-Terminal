@@ -1,4 +1,4 @@
-// js/vpvr-view.js -- VPVR rendering + chart integration for Lightweight Charts v4.1.1.
+// js/vpvr-view.js -- VPVR rendering + chart integration for Lightweight Charts v5.
 // Depends on global `VPVR` (vpvr.js) and `LightweightCharts`. Exposes global `VPVRView`.
 //
 // TradingView-VRVP style: right-anchored semi-transparent horizontal bars drawn on an
@@ -162,11 +162,11 @@
       const dash = global.LightweightCharts && global.LightweightCharts.LineStyle ? global.LightweightCharts.LineStyle.Dashed : 2;
       try {
         if (s.showPOC && p.pocPrice != null) {
-          st.priceLines.push(st.series.createPriceLine({ price: p.pocPrice, color: t.accent, lineWidth: 1, lineStyle: dash, axisLabelVisible: true, title: "POC" }));
+          st.priceLines.push(st.series.createPriceLine({ price: p.pocPrice, color: t.accent, lineWidth: 1, lineStyle: dash, axisLabelVisible: true, axisLabelTextColor: t.onAccent, title: "POC" }));
         }
         if (s.showVAHVAL) {
-          if (p.vah != null) st.priceLines.push(st.series.createPriceLine({ price: p.vah, color: t.muted, lineWidth: 1, lineStyle: dash, axisLabelVisible: true, title: "VAH" }));
-          if (p.val != null) st.priceLines.push(st.series.createPriceLine({ price: p.val, color: t.muted, lineWidth: 1, lineStyle: dash, axisLabelVisible: true, title: "VAL" }));
+          if (p.vah != null) st.priceLines.push(st.series.createPriceLine({ price: p.vah, color: t.muted, lineWidth: 1, lineStyle: dash, axisLabelVisible: true, axisLabelTextColor: t.labelText, title: "VAH" }));
+          if (p.val != null) st.priceLines.push(st.series.createPriceLine({ price: p.val, color: t.muted, lineWidth: 1, lineStyle: dash, axisLabelVisible: true, axisLabelTextColor: t.labelText, title: "VAL" }));
         }
       } catch (e) { /* priceLine API guard */ }
     }
@@ -178,12 +178,12 @@
       if (!st.settings.enabled || !st.profile || !st.profile.bins.length) return;
       const p = st.profile, t = st.theme, s = st.settings;
 
-      // plot geometry: exclude right price scale + bottom time scale
-      let psW = 0, tsH = 0;
-      try { psW = st.chart.priceScale("right").width(); } catch (e) {}
-      try { tsH = st.chart.timeScale().height(); } catch (e) {}
+      // plot geometry: exclude right price scale; clip to the price pane (pane 0)
+      let psW = 0, paneH = 0;
+      try { psW = st.chart.priceScale("right", 0).width(); } catch (e) {}
+      try { paneH = st.chart.panes()[0].getHeight(); } catch (e) {}
       const plotRight = st.cssW - psW - 2;
-      const plotBottom = st.cssH - tsH;
+      const plotBottom = paneH || st.cssH;
       if (plotRight <= 0 || plotBottom <= 0) return;
 
       let maxVol = 0;
@@ -263,6 +263,9 @@
       const rect = wrapper.getBoundingClientRect();
       const y = e.clientY - rect.top;
       const x = e.clientX - rect.left;
+      let paneH = 0;
+      try { paneH = st.chart.panes()[0].getHeight(); } catch (err) {}
+      if (paneH && y > paneH) { hideTooltip(st); return; }
       let price = null;
       try { price = st.series.coordinateToPrice(y); } catch (err) { price = null; }
       if (!Number.isFinite(+price)) { hideTooltip(st); return; }
@@ -340,6 +343,8 @@
       ink: get("--ink") || "#1c100a",
       surfaceStrong: get("--surface-strong") || "#ecd8c4",
       hairline: get("--hairline") || "#ecd8c4",
+      onAccent: get("--on-accent") || "#140904",
+      labelText: get("--vpvr-label-text") || "#ffffff",
     };
   }
 

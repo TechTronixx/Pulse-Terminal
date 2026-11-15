@@ -1,1462 +1,1689 @@
-// -- sync theme icon with the data-theme set in html head --
-const _iconEl = document.getElementById("theme-icon");
-if (_iconEl)
-  _iconEl.setAttribute(
-    "data-icon",
-    document.documentElement.getAttribute("data-theme") === "dark"
-      ? "tabler:sun"
-      : "tabler:moon",
-  );
+// js/app.js -- Pulse Terminal orchestration: state, feed -> model -> chart, and the UI.
+// Depends on PulseIndicators, PulseFeed, PulseChart, VPVR, VPVRView (loaded before it).
+(function () {
+  "use strict";
 
-// -- trading pairs and their iconify icon keys --
-const pairs = ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP", "ADA", "LINK"];
-const cryptoIcons = {
-  BTC: "cryptocurrency-color:btc",
-  ETH: "cryptocurrency-color:eth",
-  SOL: "cryptocurrency-color:sol",
-  BNB: "cryptocurrency-color:bnb",
-  DOGE: "cryptocurrency-color:doge",
-  XRP: "cryptocurrency-color:xrp",
-  ADA: "cryptocurrency-color:ada",
-  LINK: "cryptocurrency-color:link",
-};
+  const I = window.PulseIndicators;
+  const PAIRS = ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP", "ADA", "LINK"];
+  const TIMEFRAMES = ["1s", "1m", "3m", "5m", "15m", "30m"];
+  const CHART_TYPES = { candlestick: "Candles", heikinAshi: "Heikin Ashi", line: "Line" };
+  const INDICATORS = [
+    { key: "vol", name: "Volume", desc: "Bars at the bottom of the price pane: how much traded in each candle. Copper = candle closed up, grey = closed down." },
+    { key: "vwap", name: "VWAP", note: "Session, UTC", desc: "Volume-weighted average price since 00:00 UTC. Price above VWAP means buyers are paying more than today's average; below means sellers are in control." },
+    { key: "ema", name: "EMA 9 / 21", desc: "Two exponential moving averages. Blue (9) reacts fast, purple (21) is slower. Blue above purple = short-term uptrend." },
+    { key: "rsi", name: "RSI 14", desc: "Relative Strength Index in its own pane, 0 to 100. Above 70 = overbought, below 30 = oversold." },
+    { key: "vpvr", name: "VPVR", note: "Visible range", settings: "menuVpvr", desc: "Volume profile on the right edge: how much traded at each price in the visible range. POC = busiest price, VAH / VAL = the band holding 70% of volume." },
+    { key: "mcb", name: "Market Cipher B", note: "WaveTrend, MFI, Stoch", settings: "menuMcb", desc: "Momentum oscillator. Blue waves show momentum, green / red area shows money flow, dots mark crosses. Big green dot at the bottom = oversold buy signal, big red dot at the top = overbought sell signal. Open settings for the full guide." },
+  ];
+  const MCB_ALERTS = [
+    { key: "buy", title: "Buy Signal - Green dot wavetrend", tone: "up" },
+    { key: "sell", title: "Sell Signal - Red dot wavetrend", tone: "down" },
+    { key: "buySignal", title: "Green dot(Buy)-(Botton)", tone: "up" },
+    { key: "sellSignal", title: "Red Dot(Sell)-(Top)", tone: "down" },
+  ];
+  const STORE_KEY = "pulse.v2";
+  const $ = (id) => document.getElementById(id);
+  const isNa = I.isNa;
 
-// -- core state --
-let currentPair = "BTC";
-let ws = null;
-let chart = null;
-let mainSeries = null;
-let chartType = "candlestick";
-let currentTimeframe = "1s";
-const timeframeOptions = ["1s", "1m", "3m", "5m", "15m", "30m"];
-let volumeSeries = null;
-let vwapSeries = null;
-let ema9Series = null;
-let ema21Series = null;
-let rsiSeries = null;
-let isSwitching = false;
+  // ---------------------------------------------------------------- state
+  const defaults = {
+    pair: "BTC",
+    tf: "1m",
+    chartType: "candlestick",
+    theme: document.documentElement.getAttribute("data-theme") || "dark",
+    panel: "book",
+    panelOpen: true,
+    ind: { vol: true, vwap: false, ema: false, rsi: false, vpvr: false, mcb: true },
+    mcb: Object.assign({}, I.MCB_DEFAULTS),
+    alerts: { inApp: true, notify: false },
+    vpvr: {},
+  };
 
-// websocket reconnect with exponential backoff
-let reconnectAttempt = 0;
-const MAX_RECONNECT_DELAY = 30000;
+  function loadState() {
+    let saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
+    } catch (_) {}
+    const s = Object.assign({}, defaults, saved);
+    s.ind = Object.assign({}, defaults.ind, saved.ind);
+    s.mcb = Object.assign({}, defaults.mcb, saved.mcb);
+    s.alerts = Object.assign({}, defaults.alerts, saved.alerts);
+    s.vpvr = Object.assign({}, window.VPVRView ? VPVRView.DEFAULTS : {}, saved.vpvr, { enabled: !!s.ind.vpvr });
+    if (!PAIRS.includes(s.pair)) s.pair = defaults.pair;
+    if (s.panel === "insights") s.panel = "signal";
+    if (!["book", "signal", "market"].includes(s.panel)) s.panel = "book";
+    if (!TIMEFRAMES.includes(s.tf)) s.tf = defaults.tf;
+    if (!CHART_TYPES[s.chartType]) s.chartType = defaults.chartType;
+    return s;
+  }
 
-// orderbook polling state
-let obAbortController = null;
-let obIntervalId = null;
-
-const indicators = { vwap: false, ema: false, rsi: false, vol: false };
-
-// -- VPVR (Volume Profile Visible Range) --
-let vpvrView = null;
-const vpvrSettings = Object.assign(
-  {},
-  typeof VPVRView !== "undefined" ? VPVRView.DEFAULTS : {},
-);
-const candles = {};
-const rsiState = {};
-const vwapState = {};
-
-const MAX_CANDLES = 1200; // cap to prevent memory bloat
-
-pairs.forEach((pair) => {
-  candles[pair] = [];
-  rsiState[pair] = { avgGain: null, avgLoss: null, count: 0 };
-  vwapState[pair] = { cumTPV: 0, cumVol: 0, resetDay: -1 };
-});
-
-// -- pair selector buttons --
-function createPairButtons() {
-  const container = document.getElementById("pairSelector");
-  container.innerHTML = "";
-  pairs.forEach((pair) => {
-    const btn = document.createElement("button");
-    btn.className = "pair-btn" + (pair === currentPair ? " active" : "");
-    const icon = cryptoIcons[pair] || "cryptocurrency-color:generic";
-    btn.innerHTML = `<span class="iconify" data-icon="${icon}" style="font-size:16px;"></span> ${pair}`;
-    btn.onclick = () => switchPair(pair);
-    container.appendChild(btn);
-  });
-}
-// removes all chart series before rebuilding (pair/timeframe switch)
-function destroyAllSeries() {
-  [
-    mainSeries,
-    volumeSeries,
-    vwapSeries,
-    ema9Series,
-    ema21Series,
-    rsiSeries,
-  ].forEach((s) => {
-    if (s && chart) {
+  const state = loadState();
+  let saveTimer = 0;
+  function save() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
       try {
-        chart.removeSeries(s);
+        localStorage.setItem(STORE_KEY, JSON.stringify(state));
       } catch (_) {}
-    }
-  });
-  mainSeries =
-    volumeSeries =
-    vwapSeries =
-    ema9Series =
-    ema21Series =
-    rsiSeries =
-      null;
-}
-
-// creates indicator overlays (volume, vwap, ema, rsi)
-function createIndicatorSeries() {
-  volumeSeries = chart.addHistogramSeries({
-    color: "#e5e7eb",
-    priceFormat: { type: "volume" },
-    priceScaleId: "vol",
-    priceLineVisible: false,
-    visible: indicators.vol,
-  });
-  chart.priceScale("vol").applyOptions({
-    visible: false,
-    scaleMargins: { top: 0.85, bottom: 0 },
-  });
-  vwapSeries = chart.addLineSeries({
-    color: "#FCD535",
-    lineWidth: 2,
-    crosshairMarkerRadius: 0,
-    lastValueVisible: false,
-    priceLineVisible: false,
-    visible: indicators.vwap,
-  });
-  ema9Series = chart.addLineSeries({
-    color: "#3b82f6",
-    lineWidth: 1.5,
-    crosshairMarkerRadius: 0,
-    lastValueVisible: false,
-    priceLineVisible: false,
-    visible: indicators.ema,
-  });
-  ema21Series = chart.addLineSeries({
-    color: "#e67e22",
-    lineWidth: 1.5,
-    crosshairMarkerRadius: 0,
-    lastValueVisible: false,
-    priceLineVisible: false,
-    visible: indicators.ema,
-  });
-  rsiSeries = chart.addLineSeries({
-    color: "#9ca3af",
-    lineWidth: 1.5,
-    crosshairMarkerRadius: 0,
-    lastValueVisible: false,
-    priceLineVisible: false,
-    visible: indicators.rsi,
-  });
-}
-
-// (re)creates the VPVR overlay bound to the current main series + settings
-function recreateVpvrView() {
-  if (vpvrView) {
-    vpvrView.destroy();
-    vpvrView = null;
-  }
-  if (chart && mainSeries) {
-    vpvrView = VPVRView.create(chart, mainSeries, () => candles[currentPair]);
-    if (vpvrView) vpvrView.setSettings(vpvrSettings);
-  }
-}
-
-// restarts orderbook polling (called on pair switch)
-function resetObInterval() {
-  clearInterval(obIntervalId);
-  fetchOrderbookDepth();
-  obIntervalId = setInterval(fetchOrderbookDepth, 30000);
-}
-
-// tears down current ws/state and reconnects to a new pair
-function switchPair(pair) {
-  if (pair === currentPair) return;
-  currentPair = pair;
-
-  document.querySelectorAll(".pair-btn").forEach((btn, idx) => {
-    btn.classList.toggle("active", pairs[idx] === pair);
-  });
-
-  if (ws) {
-    isSwitching = true;
-    ws.onclose = ws.onerror = ws.onmessage = null;
-    try {
-      ws.close();
-    } catch (e) {
-      console.error("WS close error", e);
-    }
-    ws = null;
+    }, 200);
   }
 
-  destroyAllSeries();
-  initMainSeries();
-  createIndicatorSeries();
-  recreateVpvrView();
-  chart.timeScale().fitContent();
-
-  rsiState[pair] = { avgGain: null, avgLoss: null, count: 0 };
-  vwapState[pair] = { cumTPV: 0, cumVol: 0, resetDay: -1 };
-  insightsVolWindow.length = 0;
-
-  document.getElementById("livePrice").textContent = "-";
-  document.getElementById("priceChange").textContent = "-";
-  document.getElementById("priceChange").className =
-    "price-change number";
-  document.getElementById("ghostWatermark").textContent = pair;
-  document.getElementById("streamOverlay").classList.remove("hidden");
-
-  resetObInterval();
-  setTimeout(startStream, 100);
-}
-
-// -- chart initialization (lightweight-charts) --
-function initChart() {
-  const chartContainer = document.getElementById("chart");
-  const isDark =
-    document.documentElement.getAttribute("data-theme") === "dark";
-
-  chart = LightweightCharts.createChart(chartContainer, {
-    layout: {
-      background: {
-        type: "solid",
-        color: isDark ? "#0b0e11" : "#F0E0CE",
-      },
-      textColor: isDark ? "#707a8a" : "#8B7B6B",
-      fontFamily: "'BinancePlex', 'IBM Plex Sans', sans-serif",
-    },
-    grid: {
-      vertLines: { color: isDark ? "#2b3139" : "#ECD8C4" },
-      horzLines: { color: isDark ? "#2b3139" : "#ECD8C4" },
-    },
-    crosshair: {
-      mode: LightweightCharts.CrosshairMode.Normal,
-      vertLine: {
-        color: "#9ca3af",
-        width: 1,
-        style: 2,
-        labelBackgroundColor: "#111111",
-      },
-      horzLine: {
-        color: "#9ca3af",
-        width: 1,
-        style: 2,
-        labelBackgroundColor: "#111111",
-      },
-    },
-    timeScale: {
-      borderColor: isDark ? "#2b3139" : "#ECD8C4",
-      timeVisible: true,
-      secondsVisible: true,
-      rightOffset: 3,
-      barSpacing: 6,
-    },
-    rightPriceScale: {
-      visible: true,
-      borderColor: isDark ? "#2b3139" : "#ECD8C4",
-    },
-    width: chartContainer.clientWidth,
-    height: chartContainer.clientHeight,
-    autoSize: true,
-  });
-
-  initMainSeries();
-  createIndicatorSeries();
-  recreateVpvrView();
-
-  chart.subscribeCrosshairMove((param) => {
-    const readout = document.getElementById("readout");
-    if (!param.time || !param.seriesData.get(mainSeries)) {
-      readout.classList.remove("visible");
-      return;
-    }
-    const data = candles[currentPair].find((c) => c.time === param.time);
-    if (!data) return;
-    readout.classList.add("visible");
-    document.getElementById("r-o").textContent = data.open.toFixed(2);
-    document.getElementById("r-h").textContent = data.high.toFixed(2);
-    document.getElementById("r-l").textContent = data.low.toFixed(2);
-    const closeEl = document.getElementById("r-c");
-    closeEl.textContent = data.close.toFixed(2);
-    closeEl.className =
-      "val number " +
-      (data.close >= data.open ? "trading-up" : "trading-down");
-    document.getElementById("r-v").textContent = data.volume.toFixed(2);
-    document.getElementById("r-vwap").textContent = data.vwap
-      ? data.vwap.toFixed(2)
-      : "-";
-    document.getElementById("r-rsi").textContent = data.rsi || "-";
-  });
-}
-
-// transforms raw candle data for the active chart type
-function getChartData() {
-  const raw = candles[currentPair];
-  if (!raw.length) return [];
-
-  if (chartType === "candlestick") {
-    return raw.map((c) => ({
-      time: c.time,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
-  } else if (chartType === "line") {
-    return raw.map((c) => ({ time: c.time, value: c.close }));
-  } else if (chartType === "heikinAshi") {
-    const ha = [];
-    let prevOpen = null;
-    let prevClose = null;
-    for (let c of raw) {
-      const close = (c.open + c.high + c.low + c.close) / 4;
-      const open =
-        prevOpen !== null
-          ? (prevOpen + prevClose) / 2
-          : (c.open + c.close) / 2;
-      const high = Math.max(c.high, open, close);
-      const low = Math.min(c.low, open, close);
-      ha.push({ time: c.time, open, high, low, close });
-      prevOpen = open;
-      prevClose = close;
-    }
-    return ha;
+  // ---------------------------------------------------------------- formatting
+  const symbolInfo = {};
+  const fmtCache = {};
+  function nf(dp) {
+    if (!fmtCache[dp]) fmtCache[dp] = new Intl.NumberFormat("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+    return fmtCache[dp];
   }
-}
-
-function initMainSeries() {
-  if (mainSeries) chart.removeSeries(mainSeries);
-
-  if (chartType === "candlestick" || chartType === "heikinAshi") {
-    mainSeries = chart.addCandlestickSeries({
-      upColor: "#0ecb81",
-      downColor: "#f6465d",
-      borderVisible: false,
-      wickUpColor: "#0ecb81",
-      wickDownColor: "#f6465d",
-    });
-  } else if (chartType === "line") {
-    mainSeries = chart.addLineSeries({
-      color: "#3b82f6",
-      lineWidth: 2,
-      crosshairMarkerRadius: 4,
-    });
+  function guessPrecision(p) {
+    if (!(p > 0)) return 2;
+    if (p >= 1000) return 2;
+    if (p >= 10) return 3;
+    if (p >= 1) return 4;
+    return 5;
   }
-
-  const data = getChartData();
-  if (data.length) mainSeries.setData(data);
-}
-// -- technical indicator calculations --
-// incremental ema: maintains running state to avoid full recalc
-function calcEMAIncr(state, price, period) {
-  state.buf.push(price);
-  if (state.buf.length < period) return null;
-  if (state.buf.length === period) {
-    state.val = state.buf.reduce((a, b) => a + b, 0) / period;
-    return state.val;
+  function pricePrecision(pair, sample) {
+    const info = symbolInfo[pair];
+    return info ? info.precision : guessPrecision(sample);
   }
-  const k = 2 / (period + 1);
-  state.val = price * k + state.val * (1 - k);
-  return state.val;
-}
-
-// vwap resets daily, accumulates typical_price * volume
-function updateVWAP(candle, pair) {
-  const state = vwapState[pair];
-  const day = new Date(candle.time * 1000).getUTCDate();
-  if (state.resetDay !== day) {
-    state.cumTPV = 0;
-    state.cumVol = 0;
-    state.resetDay = day;
+  const fmtPrice = (v, pair = state.pair) => (isNa(v) ? "\u2013" : nf(pricePrecision(pair, v)).format(v));
+  const fmtNum = (v, dp = 2) => (isNa(v) ? "\u2013" : nf(dp).format(v));
+  function fmtCompact(v) {
+    if (isNa(v)) return "\u2013";
+    const a = Math.abs(v);
+    if (a >= 1e9) return nf(2).format(v / 1e9) + "B";
+    if (a >= 1e6) return nf(2).format(v / 1e6) + "M";
+    if (a >= 1e3) return nf(2).format(v / 1e3) + "K";
+    return nf(2).format(v);
   }
-  const typical = (candle.high + candle.low + candle.close) / 3;
-  state.cumTPV += typical * candle.volume;
-  state.cumVol += candle.volume;
-  return state.cumVol > 0 ? state.cumTPV / state.cumVol : candle.close;
-}
-
-// wilder's smoothed rsi(14), needs 15+ closes to produce a value
-function updateRSI(closes, pair) {
-  if (closes.length < 15) return null;
-  const state = rsiState[pair];
-  const diff = closes[closes.length - 1] - closes[closes.length - 2];
-  const gain = diff > 0 ? diff : 0;
-  const loss = diff < 0 ? -diff : 0;
-
-  if (state.count === 0) {
-    let tg = 0,
-      tl = 0;
-    for (let i = closes.length - 14; i < closes.length; i++) {
-      const d = closes[i] - closes[i - 1];
-      tg += d > 0 ? d : 0;
-      tl += d < 0 ? -d : 0;
-    }
-    state.avgGain = tg / 14;
-    state.avgLoss = tl / 14;
-    state.count = 14;
-  } else {
-    state.avgGain = (state.avgGain * 13 + gain) / 14;
-    state.avgLoss = (state.avgLoss * 13 + loss) / 14;
+  function fmtQty(v) {
+    if (isNa(v)) return "\u2013";
+    if (v >= 1e5) return fmtCompact(v);
+    if (v >= 100) return nf(2).format(v);
+    if (v >= 1) return nf(3).format(v);
+    return nf(4).format(v);
   }
-  const rs = state.avgLoss === 0 ? 100 : state.avgGain / state.avgLoss;
-  return 100 - 100 / (1 + rs);
-}
+  const fmtPct = (v) => (isNa(v) ? "\u2013" : (v >= 0 ? "+" : "") + nf(2).format(v) + "%");
+  const coinIcon = (pair) => `icons/coins/${pair.toLowerCase()}.svg`;
 
-function updateLivePrice(candle) {
-  document.getElementById("livePrice").textContent =
-    "$" +
-    candle.close.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-}
+  // ---------------------------------------------------------------- chart + model
+  const chartView = PulseChart.create($("chart"), { theme: state.theme });
+  let model = { bars: [], ha: [], vwap: [], ema9: [], ema21: [], rsi: [], mcb: null };
+  let vpvrView = null;
+  let lastBarTime = null;
+  let hoverIndex = -1;
+  let historyReady = false;
+  let lastComputeAt = 0;
+  let trailingTimer = 0;
+  const LIVE_RECOMPUTE_MS = 80;
 
-// fetches orderbook depth + 24h ticker from binance rest api
-// aborts previous in-flight request to avoid stale data races
-async function fetchOrderbookDepth() {
-  if (obAbortController) obAbortController.abort();
-  obAbortController = new AbortController();
-  const { signal } = obAbortController;
-
-  const widget = document.getElementById("orderbookWidget");
-  const pair = currentPair + "USDT";
-
-  try {
-    const [tickerRes, depthRes] = await Promise.all([
-      fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`, {
-        signal,
-      }),
-      fetch(
-        `https://api.binance.com/api/v3/depth?symbol=${pair}&limit=20`,
-        { signal },
-      ),
-    ]);
-
-    if (!tickerRes.ok || !depthRes.ok)
-      throw new Error("Binance API Error");
-
-    const ticker = await tickerRes.json();
-    const depth = await depthRes.json();
-    const changePct = parseFloat(ticker.priceChangePercent);
-
-    const changeEl = document.getElementById("priceChange");
-    const sign = changePct >= 0 ? "+" : "";
-    changeEl.textContent = `${sign}${changePct.toFixed(2)}% (24H)`;
-    changeEl.className =
-      "price-change number " +
-      (changePct >= 0 ? "trading-up" : "trading-down");
-
-    const bids = depth.bids
-      .slice(0, 10)
-      .map((b) => [parseFloat(b[0]), parseFloat(b[1])]);
-    const asks = depth.asks
-      .slice(0, 10)
-      .map((a) => [parseFloat(a[0]), parseFloat(a[1])]);
-
-    let askTotal = 0;
-    asks.forEach((a) => {
-      askTotal += a[1];
-      a[2] = askTotal;
-    });
-    let bidTotal = 0;
-    bids.forEach((b) => {
-      bidTotal += b[1];
-      b[2] = bidTotal;
-    });
-
-    const maxTotal = Math.max(askTotal, bidTotal);
-
-
-    const asksHtml = asks
-      .reverse()
-      .map(
-        (a) => `
-      <div class="ob-row">
-        <div class="ob-bg-ask" style="width:${((a[2] / maxTotal) * 100).toFixed(1)}%"></div>
-        <div class="ob-col ob-price-ask">${a[0].toFixed(2)}</div>
-        <div class="ob-col">${a[1].toFixed(4)}</div>
-        <div class="ob-col">${a[2].toFixed(4)}</div>
-      </div>`,
-      )
-      .join("");
-
-    const bidsHtml = bids
-      .map(
-        (b) => `
-      <div class="ob-row">
-        <div class="ob-bg-bid" style="width:${((b[2] / maxTotal) * 100).toFixed(1)}%"></div>
-        <div class="ob-col ob-price-bid">${b[0].toFixed(2)}</div>
-        <div class="ob-col">${b[1].toFixed(4)}</div>
-        <div class="ob-col">${b[2].toFixed(4)}</div>
-      </div>`,
-      )
-      .join("");
-
-    const spread = (asks[asks.length - 1][0] - bids[0][0]).toFixed(2);
-    const midPrice = parseFloat(ticker.lastPrice).toLocaleString(
-      "en-US",
-      { minimumFractionDigits: 2, maximumFractionDigits: 4 },
-    );
-
-    widget.innerHTML = `
-      <div class="ob-table" style="margin:-16px">
-        <div class="ob-header"><div>PRICE</div><div>SIZE</div><div>TOTAL</div></div>
-        <div style="padding-top:4px">${asksHtml}</div>
-        <div class="ob-mid">
-          <div class="ob-mid-price">${midPrice}</div>
-          <div class="ob-mid-spread">SPREAD ${spread}</div>
-        </div>
-        <div style="padding-bottom:4px">${bidsHtml}</div>
-      </div>`;
-
-    // update 24h stats sidebar
-    const fmt = (n, dp = 2) =>
-      parseFloat(n).toLocaleString("en-US", {
-        minimumFractionDigits: dp,
-        maximumFractionDigits: dp,
-      });
-    const fmtK = (n) => {
-      const v = parseFloat(n);
-      return v >= 1e6
-        ? (v / 1e6).toFixed(2) + "M"
-        : v >= 1e3
-          ? (v / 1e3).toFixed(2) + "K"
-          : v.toFixed(2);
+  function computeModel(bars) {
+    const closes = bars.map((b) => b.close);
+    lastComputeAt = performance.now();
+    return {
+      bars,
+      ha: state.chartType === "heikinAshi" ? I.heikinAshi(bars) : null,
+      vwap: I.vwap(bars, vwapSeed),
+      ema9: I.ema(closes, 9),
+      ema21: I.ema(closes, 21),
+      rsi: I.rsi(closes, 14),
+      mcb: state.ind.mcb ? I.marketCipherB(bars, state.mcb) : null,
+      closes,
     };
-    const high24 = document.getElementById("stat-high");
-    const low24 = document.getElementById("stat-low");
-    if (high24) {
-      high24.textContent = fmt(ticker.highPrice);
-      high24.className = "stat-value up";
-    }
-    if (low24) {
-      low24.textContent = fmt(ticker.lowPrice);
-      low24.className = "stat-value down";
-    }
-    const vol24 = document.getElementById("stat-vol");
-    if (vol24) vol24.textContent = fmtK(ticker.volume);
-    const trades = document.getElementById("stat-trades");
-    if (trades)
-      trades.textContent = parseInt(
-        ticker.count || ticker.tradeCount || 0,
-      ).toLocaleString();
-    const open24 = document.getElementById("stat-open");
-    if (open24) open24.textContent = fmt(ticker.openPrice);
-    const qvol = document.getElementById("stat-qvol");
-    if (qvol) qvol.textContent = fmtK(ticker.quoteVolume);
-
-    updateInsightsOrderbook(bids, asks, maxTotal);
-  } catch (error) {
-    if (error.name === "AbortError") return;
-    console.error("[Fetch] fetchOrderbookDepth failed:", error);
-    widget.innerHTML =
-      '<div class="loading"><span class="iconify" data-icon="tabler:alert-triangle" style="font-size:24px;color:var(--trading-down);margin-bottom:8px"></span><br/>Orderbook unavailable. Retrying...</div>';
-  }
-}
-
-// updates the sidebar technical signals panel
-function updateSignals(candle, rsi, ema9, ema21, vwap) {
-  const widget = document.getElementById("signalsWidget");
-
-  let rsiSignal = "neutral",
-    rsiText = "Hold",
-    rsiVal = "-";
-  if (rsi !== null) {
-    rsiVal = rsi.toFixed(2);
-    if (rsi < 30) {
-      rsiSignal = "bullish";
-      rsiText = "Buy";
-    } else if (rsi > 70) {
-      rsiSignal = "bearish";
-      rsiText = "Sell";
-    }
   }
 
-  let emaSignal = "neutral",
-    emaText = "Hold";
-  if (ema9 !== null && ema21 !== null) {
-    if (ema9 > ema21) {
-      emaSignal = "bullish";
-      emaText = "Buy";
-    } else if (ema9 < ema21) {
-      emaSignal = "bearish";
-      emaText = "Sell";
+  // Intra-bar ticks between full recomputes: move only the live candle and its volume.
+  function updateLiveBarOnly() {
+    const bars = model.bars;
+    const n = bars.length;
+    if (state.chartType === "heikinAshi" && model.ha && n) {
+      const b = bars[n - 1];
+      const prev = model.ha[n - 2];
+      const close = (b.open + b.high + b.low + b.close) / 4;
+      const open = prev ? (prev.open + prev.close) / 2 : (b.open + b.close) / 2;
+      model.ha[n - 1] = { time: b.time, open, high: Math.max(b.high, open, close), low: Math.min(b.low, open, close), close };
+    }
+    chartView.updateLive(model);
+  }
+
+  // ---- VWAP session seed (history can start after 00:00 UTC on 1s / 1m) ----
+  let vwapSeed = null;
+  let seedGen = 0;
+
+  function addToSeed(seed, list, day) {
+    let pv = seed && seed.day === day ? seed.pv : 0;
+    let vol = seed && seed.day === day ? seed.vol : 0;
+    for (const b of list) {
+      if (Math.floor(b.time / 86400) !== day) continue;
+      pv += ((b.high + b.low + b.close) / 3) * b.volume;
+      vol += b.volume;
+    }
+    return { day, pv, vol };
+  }
+
+  async function loadVwapSeed(bars) {
+    const myGen = ++seedGen;
+    vwapSeed = null;
+    if (!bars.length) return;
+    const first = bars[0].time;
+    const day = Math.floor(first / 86400);
+    const dayStart = day * 86400;
+    if (first <= dayStart) return;
+    const pair = state.pair;
+    try {
+      const minuteEdge = Math.floor(first / 60) * 60;
+      const parts = await Promise.all([
+        minuteEdge > dayStart ? PulseFeed.fetchKlines(pair, "1m", dayStart * 1000, minuteEdge * 1000) : [],
+        first > minuteEdge ? PulseFeed.fetchKlines(pair, "1s", minuteEdge * 1000, first * 1000) : [],
+      ]);
+      if (myGen !== seedGen || pair !== state.pair) return;
+      vwapSeed = addToSeed(null, parts[0].concat(parts[1]), day);
+      model = computeModel(model.bars);
+      chartView.setData(model);
+      updateLegend();
+    } catch (err) {
+      console.warn("[vwap seed]", err);
     }
   }
 
-  let vwapSignal = "neutral",
-    vwapText = "Hold";
-  if (vwap !== null) {
-    if (candle.close > vwap) {
-      vwapSignal = "bullish";
-      vwapText = "Buy";
-    } else if (candle.close < vwap) {
-      vwapSignal = "bearish";
-      vwapText = "Sell";
+  function recreateVpvr() {
+    if (vpvrView) {
+      vpvrView.destroy();
+      vpvrView = null;
+    }
+    if (window.VPVRView) {
+      vpvrView = VPVRView.create(chartView.chart, chartView.main, () => model.bars);
+      if (vpvrView) vpvrView.setSettings(state.vpvr);
     }
   }
 
-  widget.innerHTML = `
-        <div class="signal-row">
-          <div class="signal-label">
-            <div class="signal-name">RSI (14)</div>
-            <div class="signal-desc number">${rsiVal}</div>
-          </div>
-          <div class="badge ${rsiSignal}">${rsiText}</div>
-        </div>
-        <div class="signal-row">
-          <div class="signal-label">
-            <div class="signal-name">EMA Trend</div>
-            <div class="signal-desc">9 vs 21 Period</div>
-          </div>
-          <div class="badge ${emaSignal}">${emaText}</div>
-        </div>
-        <div class="signal-row">
-          <div class="signal-label">
-            <div class="signal-name">VWAP</div>
-            <div class="signal-desc">Vol-Weighted Price</div>
-          </div>
-          <div class="badge ${vwapSignal}">${vwapText}</div>
-        </div>
-      `;
-}
+  function applyIndicators() {
+    chartView.setMcbParams(state.mcb);
+    chartView.setIndicators(state.ind);
+    model = computeModel(model.bars);
+    if (model.bars.length) chartView.setData(model);
+    state.vpvr.enabled = !!state.ind.vpvr;
+    if (vpvrView) vpvrView.setSettings({ enabled: state.vpvr.enabled });
+    renderIndicatorMenu();
+    renderLegendVisibility();
+    updateLegend();
+    queuePaneLayout();
+    if (typeof recomputeMtf === "function") {
+      recomputeMtf();
+      updateInsights(true);
+    }
+    save();
+  }
 
-// -- websocket stream (binance kline) --
-async function startStream() {
-  if (ws) return;
-  const symbol = currentPair.toLowerCase() + "usdt";
-
-  const ema9State = { buf: [], val: null };
-  const ema21State = { buf: [], val: null };
-  let prevHaOpen = null,
-    prevHaClose = null;
-  const closes = [];
-
-  try {
-    const histRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${currentPair}USDT&interval=${currentTimeframe}&limit=100`);
-    if (histRes.ok) {
-      const histData = await histRes.json();
-      
-      const chartPoints = [];
-      const volPoints = [];
-      const vwapPoints = [];
-      const ema9Points = [];
-      const ema21Points = [];
-      const rsiPoints = [];
-
-      histData.forEach(k => {
-        const candle = {
-          time: Math.floor(k[0] / 1000),
-          open: parseFloat(k[1]),
-          high: parseFloat(k[2]),
-          low: parseFloat(k[3]),
-          close: parseFloat(k[4]),
-          volume: parseFloat(k[5]),
-          takerBuy: parseFloat(k[9]),
-        };
-
-        closes.push(candle.close);
-        if (closes.length > 100) closes.shift();
-
-        const vwap = updateVWAP(candle, currentPair);
-        const rsi = updateRSI(closes, currentPair);
-        const ema9 = calcEMAIncr(ema9State, candle.close, 9);
-        const ema21 = calcEMAIncr(ema21State, candle.close, 21);
-
-        const data = {
-          ...candle,
-          vwap,
-          rsi: rsi !== null ? rsi.toFixed(2) : null,
-          ema9: ema9 !== null ? ema9.toFixed(2) : null,
-          ema21: ema21 !== null ? ema21.toFixed(2) : null,
-        };
-
-        candles[currentPair].push(data);
-        if (candles[currentPair].length > MAX_CANDLES)
-          candles[currentPair].shift();
-
-        let pointToUpdate;
-        if (chartType === "heikinAshi") {
-          const haClose = (candle.open + candle.high + candle.low + candle.close) / 4;
-          const haOpen = prevHaOpen !== null ? (prevHaOpen + prevHaClose) / 2 : (candle.open + candle.close) / 2;
-          const haHigh = Math.max(candle.high, haOpen, haClose);
-          const haLow = Math.min(candle.low, haOpen, haClose);
-          prevHaOpen = haOpen;
-          prevHaClose = haClose;
-          pointToUpdate = { time: candle.time, open: haOpen, high: haHigh, low: haLow, close: haClose };
-        } else if (chartType === "line") {
-          pointToUpdate = { time: candle.time, value: candle.close };
-        } else {
-          pointToUpdate = candle;
-        }
-        chartPoints.push(pointToUpdate);
-        
-        volPoints.push({ time: candle.time, value: candle.volume, color: candle.close >= candle.open ? "#0ecb8180" : "#f6465d80" });
-        if (vwap !== null) vwapPoints.push({ time: candle.time, value: vwap });
-        if (ema9 !== null) ema9Points.push({ time: candle.time, value: ema9 });
-        if (ema21 !== null) ema21Points.push({ time: candle.time, value: ema21 });
-        if (rsi !== null) rsiPoints.push({ time: candle.time, value: rsi });
-        
-        insightsVolWindow.push(candle.volume);
-        if (insightsVolWindow.length > INSIGHTS_VOL_WINDOW) insightsVolWindow.shift();
-      });
-
-      if (mainSeries && chartPoints.length) mainSeries.setData(chartPoints);
-      if (volumeSeries && volPoints.length) volumeSeries.setData(volPoints);
-      if (vwapSeries && vwapPoints.length) vwapSeries.setData(vwapPoints);
-      if (ema9Series && ema9Points.length) ema9Series.setData(ema9Points);
-      if (ema21Series && ema21Points.length) ema21Series.setData(ema21Points);
-      if (rsiSeries && rsiPoints.length) rsiSeries.setData(rsiPoints);
-      
-      chart.timeScale().fitContent();
-
-      if (candles[currentPair].length) {
-        const lastCandle = candles[currentPair][candles[currentPair].length - 1];
-        updateLivePrice(lastCandle);
-        updateSignals(lastCandle, parseFloat(lastCandle.rsi), parseFloat(lastCandle.ema9), parseFloat(lastCandle.ema21), lastCandle.vwap);
-        updateAITradingAnalysis(lastCandle, lastCandle.vwap, closes);
-        updateInsightsWhale(lastCandle);
-        updateInsightsMACD(closes);
-        updateInsightsBB(lastCandle.close, closes);
+  // ---------------------------------------------------------------- feed
+  const feed = PulseFeed.create({
+    onHistory(bars) {
+      vwapSeed = null;
+      model = computeModel(bars);
+      chartView.setData(model);
+      const n = bars.length;
+      if (n) {
+        chartView.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 160), to: n + 8 });
+        lastBarTime = bars[n - 1].time;
       }
-      
-      const overlay = document.getElementById("streamOverlay");
-      if (overlay) overlay.classList.add("hidden");
-    }
-  } catch (e) {
-    console.error("Failed to fetch history", e);
+      historyReady = true;
+      if (vpvrView) vpvrView.update();
+      $("streamOverlay").classList.add("is-hidden");
+      updateQuote();
+      updateLegend();
+      updateInsights(true);
+      loadVwapSeed(bars);
+    },
+    onBars(bars, { from, reset, closedTimes, trimmed }) {
+      if (!historyReady) return;
+      const n = bars.length;
+      const newBar = n && bars[n - 1].time !== lastBarTime;
+      if (trimmed && trimmed.length && n) {
+        vwapSeed = addToSeed(vwapSeed, trimmed, Math.floor(bars[0].time / 86400));
+      }
+      const liveOnly =
+        !newBar && !reset && !(closedTimes && closedTimes.length) && from >= n - 1 &&
+        performance.now() - lastComputeAt < LIVE_RECOMPUTE_MS;
+      if (liveOnly) {
+        model.bars = bars;
+        updateLiveBarOnly();
+        clearTimeout(trailingTimer);
+        trailingTimer = setTimeout(() => {
+          if (!historyReady || model.bars !== bars) return;
+          model = computeModel(bars);
+          chartView.update(model, bars.length - 1);
+          if (vpvrView) vpvrView.update();
+          if (hoverIndex < 0) updateLegend();
+        }, LIVE_RECOMPUTE_MS);
+      } else {
+        clearTimeout(trailingTimer);
+        model = computeModel(bars);
+        if (reset) chartView.setData(model);
+        else chartView.update(model, from);
+        if (vpvrView) vpvrView.update();
+      }
+      if (newBar) lastBarTime = bars[n - 1].time;
+      // Alerts run on Binance's final kline for the bar (x=true), like a bar-close alertcondition.
+      if (!liveOnly && closedTimes) for (const t of closedTimes) checkAlerts(barIndexAtTime(t));
+      updateQuote();
+      if (hoverIndex < 0) updateLegend();
+      updateInsights(false);
+    },
+    onDepth(depth) {
+      renderBook(depth);
+    },
+    onTicker(tk) {
+      renderTicker(tk);
+    },
+    onMini(minis) {
+      for (const base in minis) renderPairTab(base, minis[base]);
+    },
+    onStatus(s) {
+      renderStatus(s);
+    },
+    onStats(st) {
+      $("latency").textContent = isNa(st.latency) ? "Feed \u2013 ms" : `Feed ${Math.round(st.latency)} ms`;
+      $("tps").textContent = `${st.tradesPerSec} trades/s`;
+    },
+    onError(err) {
+      console.error("[feed]", err);
+      $("streamText").textContent = "Binance did not respond. Retrying automatically.";
+      $("streamOverlay").classList.remove("is-hidden");
+    },
+  });
+
+  function startFeed() {
+    historyReady = false;
+    lastBarTime = null;
+    lastBook = null;
+    lastTicker = null;
+    vwapSeed = null;
+    seedGen++;
+    clearTimeout(trailingTimer);
+    model = computeModel([]);
+    chartView.setData(model);
+    $("streamText").textContent = `Loading 1,000 ${state.tf} bars from Binance`;
+    $("streamOverlay").classList.remove("is-hidden");
+    resetBookView();
+    feed.start(state.pair, state.tf, PAIRS);
   }
 
-  try {
-    ws = new WebSocket(
-      "wss://stream.binance.com:9443/ws/" +
-        symbol +
-        "@kline_" +
-        currentTimeframe,
-    );
-  } catch (e) {
-    console.error("[WebSocket] Failed to open connection.", e);
-    return;
+  // ---------------------------------------------------------------- pair / timeframe / type
+  function applyPrecision() {
+    const info = symbolInfo[state.pair];
+    if (info) chartView.setPrecision(info.precision, info.tickSize);
   }
 
-  ws.onopen = () => {
-    isSwitching = false;
-    reconnectAttempt = 0;
-    document.getElementById("status").classList.add("live");
-  };
+  function switchPair(pair) {
+    if (pair === state.pair) return;
+    state.pair = pair;
+    save();
+    renderSymbol();
+    applyPrecision();
+    startFeed();
+    resetMarketData();
+    market.start(pair);
+  }
 
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    const k = msg.k;
-    const candle = {
-      time: Math.floor(k.t / 1000),
-      open: parseFloat(k.o),
-      high: parseFloat(k.h),
-      low: parseFloat(k.l),
-      close: parseFloat(k.c),
-      volume: parseFloat(k.v),
-      takerBuy: parseFloat(k.V),
-    };
+  function switchTimeframe(tf) {
+    if (tf === state.tf) return;
+    state.tf = tf;
+    save();
+    renderTimeframes();
+    chartView.setSecondsVisible(tf === "1s");
+    startFeed();
+  }
 
-    const overlay = document.getElementById("streamOverlay");
-    if (overlay && !overlay.classList.contains("hidden"))
-      overlay.classList.add("hidden");
+  function switchChartType(type) {
+    if (type === state.chartType) return;
+    state.chartType = type;
+    save();
+    renderChartTypes();
+    model = computeModel(model.bars);
+    chartView.setChartType(type, model);
+    applyPrecision();
+    recreateVpvr();
+  }
 
-    closes.push(candle.close);
-    if (closes.length > 100) closes.shift();
+  function toggleIndicator(key, on) {
+    state.ind[key] = on === undefined ? !state.ind[key] : !!on;
+    applyIndicators();
+  }
 
-    const vwap = updateVWAP(candle, currentPair);
-    const rsi = updateRSI(closes, currentPair);
-    const ema9 = calcEMAIncr(ema9State, candle.close, 9);
-    const ema21 = calcEMAIncr(ema21State, candle.close, 21);
+  // ---------------------------------------------------------------- top bar
+  function renderPairTabs() {
+    const nav = $("pairTabs");
+    nav.innerHTML = "";
+    for (const p of PAIRS) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "pair-tab";
+      b.dataset.pair = p;
+      b.setAttribute("aria-pressed", String(p === state.pair));
+      b.innerHTML =
+        `<img src="${coinIcon(p)}" alt="" width="14" height="14" />` +
+        `<span class="pair-sym">${p}</span>` +
+        `<span class="pair-chg num" data-chg>\u2013</span>`;
+      b.addEventListener("click", () => switchPair(p));
+      nav.appendChild(b);
+    }
+  }
 
-    const data = {
-      ...candle,
-      vwap,
-      rsi: rsi !== null ? rsi.toFixed(2) : null,
-      ema9: ema9 !== null ? ema9.toFixed(2) : null,
-      ema21: ema21 !== null ? ema21.toFixed(2) : null,
-    };
+  const miniCache = {};
+  function renderPairTab(base, mini) {
+    miniCache[base] = mini;
+    const el = document.querySelector(`.pair-tab[data-pair="${base}"] [data-chg]`);
+    if (!el) return;
+    el.textContent = fmtPct(mini.changePct);
+    el.dataset.dir = mini.changePct >= 0 ? "up" : "down";
+  }
 
-    const lastRaw = candles[currentPair][candles[currentPair].length - 1];
-    if (lastRaw && lastRaw.time === candle.time) {
-      candles[currentPair][candles[currentPair].length - 1] = data;
-    } else {
-      candles[currentPair].push(data);
-      if (candles[currentPair].length > MAX_CANDLES)
-        candles[currentPair].shift();
+  function renderSymbol() {
+    document.querySelectorAll(".pair-tab").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.pair === state.pair)));
+    $("symbolText").textContent = `${state.pair}-USDT`;
+    $("symbolIcon").src = coinIcon(state.pair);
+    $("lgSymbol").textContent = `${state.pair}-USDT`;
+    $("bookBase").textContent = `(${state.pair})`;
+    renderLegendMeta();
+  }
+
+  function renderLegendMeta() {
+    $("lgMeta").textContent = `${state.tf} \u00b7 ${CHART_TYPES[state.chartType]} \u00b7 Binance`;
+  }
+
+  function renderTimeframes() {
+    const seg = $("tfSeg");
+    if (!seg.children.length) {
+      for (const tf of TIMEFRAMES) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.setAttribute("role", "radio");
+        b.dataset.tf = tf;
+        b.textContent = tf;
+        b.addEventListener("click", () => switchTimeframe(tf));
+        seg.appendChild(b);
+      }
+    }
+    for (const b of seg.children) b.setAttribute("aria-checked", String(b.dataset.tf === state.tf));
+    renderLegendMeta();
+  }
+
+  function renderChartTypes() {
+    for (const b of $("typeSeg").children) b.setAttribute("aria-checked", String(b.dataset.type === state.chartType));
+    renderLegendMeta();
+  }
+
+  $("typeSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-type]");
+    if (b) switchChartType(b.dataset.type);
+  });
+
+  function applyTheme(name) {
+    state.theme = name;
+    document.documentElement.setAttribute("data-theme", name);
+    document.querySelector('meta[name="theme-color"]').setAttribute("content", name === "dark" ? "#0d0d0d" : "#fbfbfa");
+    $("themeIcon").setAttribute("href", name === "dark" ? "#i-sun" : "#i-moon");
+    $("themeBtn").setAttribute("aria-label", name === "dark" ? "Switch to light theme" : "Switch to dark theme");
+    chartView.setTheme(name, model);
+    if (vpvrView) vpvrView.refreshTheme();
+    save();
+  }
+  $("themeBtn").addEventListener("click", () => applyTheme(state.theme === "dark" ? "light" : "dark"));
+
+  // ---------------------------------------------------------------- quote + ticker
+  let lastTicker = null;
+  let prevPrice = NaN;
+  let titleAt = 0;
+
+  function updateQuote() {
+    const bars = model.bars;
+    if (!bars.length) return;
+    const price = bars[bars.length - 1].close;
+    const el = $("lastPrice");
+    el.textContent = fmtPrice(price);
+    if (!isNa(prevPrice) && price !== prevPrice) el.dataset.dir = price > prevPrice ? "up" : "down";
+    prevPrice = price;
+    const now = Date.now();
+    if (now - titleAt > 1000) {
+      titleAt = now;
+      document.title = `${fmtPrice(price)} ${state.pair}-USDT \u00b7 Pulse Terminal`;
+    }
+    if (lastTicker && lastTicker.open) {
+      const pct = ((price - lastTicker.open) / lastTicker.open) * 100;
+      const chip = $("changeChip");
+      chip.textContent = fmtPct(pct);
+      chip.dataset.dir = pct >= 0 ? "up" : "down";
+    }
+  }
+
+  function renderTicker(tk) {
+    lastTicker = tk;
+    $("sHigh").textContent = fmtPrice(tk.high);
+    $("sLow").textContent = fmtPrice(tk.low);
+    $("sQvol").textContent = "$" + fmtCompact(tk.quoteVolume);
+    $("st-high").textContent = fmtPrice(tk.high);
+    $("st-low").textContent = fmtPrice(tk.low);
+    $("st-open").textContent = fmtPrice(tk.open);
+    $("st-trades").textContent = nf(0).format(tk.trades);
+    $("st-vol").textContent = fmtCompact(tk.volume) + " " + state.pair;
+    $("st-qvol").textContent = "$" + fmtCompact(tk.quoteVolume);
+    updateQuote();
+  }
+
+  // ---------------------------------------------------------------- order book
+  const BOOK_ROWS = 12;
+  let bookRows = { asks: [], bids: [] };
+  let lastBook = null;
+
+  function buildBookRows() {
+    for (const side of ["asks", "bids"]) {
+      const host = $(side === "asks" ? "bookAsks" : "bookBids");
+      host.innerHTML = "";
+      bookRows[side] = [];
+      for (let i = 0; i < BOOK_ROWS; i++) {
+        const row = document.createElement("div");
+        row.className = "book-row";
+        row.innerHTML = '<span class="book-depth"></span><span class="book-price num"></span><span class="num"></span><span class="num"></span>';
+        host.appendChild(row);
+        const [depth, price, size, total] = row.children;
+        bookRows[side].push({ depth, price, size, total });
+      }
+    }
+  }
+
+  function resetBookView() {
+    for (const side of ["asks", "bids"]) {
+      for (const r of bookRows[side]) {
+        r.price.textContent = r.size.textContent = r.total.textContent = "";
+        r.depth.style.transform = "scaleX(0)";
+      }
+    }
+    $("bookMid").textContent = "\u2013";
+    $("bookSpread").textContent = "Spread \u2013";
+    $("pressBid").style.transform = "scaleX(0.5)";
+    $("pressBidTxt").textContent = "Bids \u2013";
+    $("pressAskTxt").textContent = "\u2013 Asks";
+  }
+
+  function renderBook(depth) {
+    lastBook = depth;
+    const asks = depth.asks.slice(0, BOOK_ROWS);
+    const bids = depth.bids.slice(0, BOOK_ROWS);
+    if (!asks.length || !bids.length) return;
+    let cum = 0;
+    const askCum = asks.map((a) => (cum += a[1]));
+    cum = 0;
+    const bidCum = bids.map((b) => (cum += b[1]));
+    const max = Math.max(askCum[askCum.length - 1], bidCum[bidCum.length - 1]) || 1;
+
+    // asks: best ask sits at the bottom of the ask block, next to the spread
+    for (let i = 0; i < BOOK_ROWS; i++) {
+      const r = bookRows.asks[BOOK_ROWS - 1 - i];
+      const a = asks[i];
+      if (!a) {
+        r.price.textContent = r.size.textContent = r.total.textContent = "";
+        r.depth.style.transform = "scaleX(0)";
+        continue;
+      }
+      r.price.textContent = fmtPrice(a[0]);
+      r.size.textContent = fmtQty(a[1]);
+      r.total.textContent = fmtQty(askCum[i]);
+      r.depth.style.transform = `scaleX(${(askCum[i] / max).toFixed(4)})`;
+    }
+    for (let i = 0; i < BOOK_ROWS; i++) {
+      const r = bookRows.bids[i];
+      const b = bids[i];
+      if (!b) {
+        r.price.textContent = r.size.textContent = r.total.textContent = "";
+        r.depth.style.transform = "scaleX(0)";
+        continue;
+      }
+      r.price.textContent = fmtPrice(b[0]);
+      r.size.textContent = fmtQty(b[1]);
+      r.total.textContent = fmtQty(bidCum[i]);
+      r.depth.style.transform = `scaleX(${(bidCum[i] / max).toFixed(4)})`;
     }
 
-    if (candles[currentPair].length === 10)
-      chart.timeScale().fitContent();
+    const bestAsk = depth.asks[0][0];
+    const bestBid = depth.bids[0][0];
+    const mid = (bestAsk + bestBid) / 2;
+    const spread = bestAsk - bestBid;
+    $("bookMid").textContent = fmtPrice(mid);
+    $("bookSpread").textContent = `Spread ${fmtPrice(spread)} (${nf(2).format((spread / mid) * 10000)} bps)`;
 
-    // build the data point for the active chart type
-    let pointToUpdate;
-    if (chartType === "heikinAshi") {
-      const haClose =
-        (candle.open + candle.high + candle.low + candle.close) / 4;
-      const haOpen =
-        prevHaOpen !== null
-          ? (prevHaOpen + prevHaClose) / 2
-          : (candle.open + candle.close) / 2;
-      const haHigh = Math.max(candle.high, haOpen, haClose);
-      const haLow = Math.min(candle.low, haOpen, haClose);
-      prevHaOpen = haOpen;
-      prevHaClose = haClose;
-      pointToUpdate = {
-        time: candle.time,
-        open: haOpen,
-        high: haHigh,
-        low: haLow,
-        close: haClose,
-      };
-    } else if (chartType === "line") {
-      pointToUpdate = { time: candle.time, value: candle.close };
-    } else {
-      pointToUpdate = candle;
+    const bidVol = depth.bids.reduce((s, l) => s + l[1], 0);
+    const askVol = depth.asks.reduce((s, l) => s + l[1], 0);
+    const share = bidVol + askVol > 0 ? bidVol / (bidVol + askVol) : 0.5;
+    $("pressBid").style.transform = `scaleX(${share.toFixed(4)})`;
+    $("pressBidTxt").textContent = `Bids ${Math.round(share * 100)}%`;
+    $("pressAskTxt").textContent = `${100 - Math.round(share * 100)}% Asks`;
+  }
+
+  // ---------------------------------------------------------------- legend
+  function barIndexAtTime(time) {
+    const bars = model.bars;
+    let lo = 0;
+    let hi = bars.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (bars[mid].time === time) return mid;
+      if (bars[mid].time < time) lo = mid + 1;
+      else hi = mid - 1;
     }
-    mainSeries.update(pointToUpdate);
+    return -1;
+  }
 
-    if (indicators.vol)
-      volumeSeries.update({
-        time: candle.time,
-        value: candle.volume,
-        color: candle.close >= candle.open ? "#0ecb8180" : "#f6465d80",
-      });
-    if (indicators.vwap)
-      vwapSeries.update({ time: candle.time, value: vwap });
-    if (indicators.ema) {
-      if (ema9 !== null)
-        ema9Series.update({ time: candle.time, value: ema9 });
-      if (ema21 !== null)
-        ema21Series.update({ time: candle.time, value: ema21 });
+  function setVal(id, v, fmt) {
+    const el = $(id);
+    const txt = fmt(v);
+    if (el.textContent !== txt) el.textContent = txt;
+  }
+
+  function updateLegend() {
+    const bars = model.bars;
+    if (!bars.length) return;
+    const i = hoverIndex >= 0 && hoverIndex < bars.length ? hoverIndex : bars.length - 1;
+    const b = bars[i];
+    setVal("lgO", b.open, fmtPrice);
+    setVal("lgH", b.high, fmtPrice);
+    setVal("lgL", b.low, fmtPrice);
+    setVal("lgC", b.close, fmtPrice);
+    const chg = b.close - b.open;
+    const chgEl = $("lgChg");
+    chgEl.textContent = `${chg >= 0 ? "+" : ""}${fmtPrice(chg)} (${fmtPct(b.open ? (chg / b.open) * 100 : NaN)})`;
+    chgEl.dataset.dir = chg >= 0 ? "up" : "down";
+    setVal("lgV", b.volume, fmtQty);
+    if (state.ind.vwap) setVal("lgVwap", model.vwap[i], fmtPrice);
+    if (state.ind.ema) {
+      setVal("lgEma9", model.ema9[i], fmtPrice);
+      setVal("lgEma21", model.ema21[i], fmtPrice);
     }
-    if (indicators.rsi && rsi !== null)
-      rsiSeries.update({ time: candle.time, value: rsi });
-
-    updateLivePrice(candle);
-    updateSignals(candle, rsi, ema9, ema21, vwap);
-    updateAITradingAnalysis(candle, vwap, closes);
-    updateInsightsWhale(candle);
-    updateInsightsMACD(closes);
-    updateInsightsBB(candle.close, closes);
-    if (vpvrView) vpvrView.update();
-  };
-
-  ws.onclose = () => {
-    document.getElementById("status").classList.remove("live");
-    ws = null;
-    if (!isSwitching) {
-      const delay = Math.min(
-        3000 * Math.pow(2, reconnectAttempt),
-        MAX_RECONNECT_DELAY,
-      );
-      reconnectAttempt++;
-      setTimeout(startStream, delay);
+    if (state.ind.rsi) setVal("lgRsi", model.rsi[i], (v) => fmtNum(v, 2));
+    if (state.ind.mcb && model.mcb) {
+      const m = model.mcb;
+      setVal("lgFast", m.fast[i], (v) => fmtNum(v, 2));
+      setVal("lgSlow", m.slow[i], (v) => fmtNum(v, 2));
+      setVal("lgWtv", m.vwap[i], (v) => fmtNum(v, 2));
+      setVal("lgMf", m.mf[i], (v) => fmtNum(v, 2));
+      $("lgMf").dataset.dir = m.mf[i] > 0 ? "up" : "down";
+      setVal("lgMrsi", m.rsi[i], (v) => fmtNum(v, 2));
+      setVal("lgStoch", m.stoch[i], (v) => fmtNum(v, 2));
+      $("lgStoch").dataset.dir = m.stoch[i] < m.rsi[i] ? "up" : "down";
     }
-  };
+  }
 
-  ws.onerror = (error) => {
-    console.error("[WebSocket] Connection error.", error);
-    if (ws) ws.close();
-  };
-}
+  function renderLegendVisibility() {
+    $("lgVolRow").hidden = !state.ind.vol;
+    $("lgVwapRow").hidden = !state.ind.vwap;
+    $("lgEmaRow").hidden = !state.ind.ema;
+    $("legendMcb").hidden = !state.ind.mcb;
+    $("legendRsi").hidden = !state.ind.rsi;
+    const p = state.mcb;
+    $("lgMcbParams").textContent = [p.wt_emaLen, p.wt_avgLen, p.wt_maLen, p.mfi_smaLen, p.mfi_signLen, p.rsi_len, p.rsi_k, p.stoch_len, p.stoch_k].join(" ");
+  }
 
-// toggles indicator visibility on chart and button state
-function toggleIndicator(key, btnId, seriesArray) {
-  indicators[key] = !indicators[key];
-  document
-    .getElementById(btnId)
-    .classList.toggle("active", indicators[key]);
-  const visible = indicators[key];
-  if (Array.isArray(seriesArray))
-    seriesArray.forEach((s) => {
-      if (s) s.applyOptions({ visible });
+  // pane legends follow the pane tops (panes can be resized by dragging)
+  let layoutRaf = 0;
+  let lastLayoutKey = "";
+  function queuePaneLayout() {
+    if (layoutRaf) return;
+    layoutRaf = requestAnimationFrame(() => {
+      layoutRaf = 0;
+      const layout = chartView.paneLayout();
+      const key = layout.map((p) => p.id + p.top).join("|");
+      if (key === lastLayoutKey) return;
+      lastLayoutKey = key;
+      for (const p of layout) {
+        const el = p.id === "mcb" ? $("legendMcb") : p.id === "rsi" ? $("legendRsi") : null;
+        if (el) el.style.transform = `translateY(${p.top}px)`;
+      }
     });
-  else if (seriesArray) seriesArray.applyOptions({ visible });
-}
-
-// syncs chart colors with the current light/dark theme
-function applyChartTheme(isDark) {
-  if (!chart) return;
-  chart.applyOptions({
-    layout: {
-      background: {
-        type: "solid",
-        color: isDark ? "#0b0e11" : "#F0E0CE",
-      },
-      textColor: isDark ? "#707a8a" : "#8B7B6B",
-    },
-    grid: {
-      vertLines: { color: isDark ? "#2b3139" : "#ECD8C4" },
-      horzLines: { color: isDark ? "#2b3139" : "#ECD8C4" },
-    },
-    timeScale: { borderColor: isDark ? "#2b3139" : "#ECD8C4" },
-    rightPriceScale: { borderColor: isDark ? "#2b3139" : "#ECD8C4" },
-  });
-}
-
-document.getElementById("btn-theme").onclick = () => {
-  const el = document.documentElement;
-  const isDark = el.getAttribute("data-theme") === "dark";
-  el.setAttribute("data-theme", isDark ? "light" : "dark");
-  document
-    .getElementById("theme-icon")
-    .setAttribute("data-icon", isDark ? "tabler:moon" : "tabler:sun");
-  applyChartTheme(!isDark);
-  if (vpvrView) vpvrView.refreshTheme();
-};
-
-// -- ui handlers --
-document.getElementById("chartTypeBtn").onclick = (e) => {
-  e.stopPropagation();
-  document.getElementById("chartTypeMenu").classList.toggle("open");
-};
-document.querySelectorAll(".chart-type-opt").forEach((btn) => {
-  btn.onclick = (e) => {
-    chartType = e.target.getAttribute("data-val");
-    document.getElementById("activeChartTypeText").textContent =
-      e.target.textContent;
-    document.getElementById("chartTypeMenu").classList.remove("open");
-    initMainSeries();
-    recreateVpvrView();
-  };
-});
-document.addEventListener("click", (e) => {
-  if (!e.target.closest(".clean-dropdown")) {
-    const menu = document.getElementById("chartTypeMenu");
-    if (menu) menu.classList.remove("open");
-    const tfMenu = document.getElementById("timeframeMenu");
-    if (tfMenu) tfMenu.classList.remove("open");
-    const vpvrMenu = document.getElementById("vpvrMenu");
-    if (vpvrMenu) vpvrMenu.classList.remove("open");
   }
-});
+  new ResizeObserver(queuePaneLayout).observe($("chart-wrapper"));
+  $("chart-wrapper").addEventListener("pointerup", () => setTimeout(queuePaneLayout, 0));
+  $("chart-wrapper").addEventListener("pointermove", (e) => {
+    if (e.buttons) queuePaneLayout();
+  });
 
-function switchTimeframe(tf) {
-  if (tf === currentTimeframe) return;
-  currentTimeframe = tf;
-  document.getElementById("activeTimeframeText").textContent = tf;
+  chartView.chart.subscribeCrosshairMove((param) => {
+    const idx = param && param.time !== undefined ? barIndexAtTime(param.time) : -1;
+    if (idx === hoverIndex) return;
+    hoverIndex = idx;
+    updateLegend();
+  });
 
-  if (ws) {
-    isSwitching = true;
-    ws.onclose = ws.onerror = ws.onmessage = null;
-    try {
-      ws.close();
-    } catch (e) {}
-    ws = null;
+  // ---------------------------------------------------------------- insights
+  let insightsAt = 0;
+
+  function setTag(id, label, tone) {
+    const el = $(id);
+    el.textContent = label;
+    el.dataset.tone = tone;
   }
 
-  pairs.forEach((pair) => {
-    candles[pair] = [];
-    rsiState[pair] = { avgGain: null, avgLoss: null, count: 0 };
-    vwapState[pair] = { cumTPV: 0, cumVol: 0, resetDay: -1 };
+  function insightsVisible() {
+    if (isMobile()) return mobileView === "signal";
+    return state.panelOpen && state.panel === "signal";
+  }
+
+  function updateInsights(force) {
+    const now = Date.now();
+    if (!force && now - insightsAt < 250) return;
+    if (!insightsVisible()) return;
+    insightsAt = now;
+    const bars = model.bars;
+    const n = bars.length;
+    if (n < 35) return;
+    const i = n - 1;
+    const price = bars[i].close;
+    const closes = model.closes;
+    const vwap = model.vwap[i];
+    const rsi = model.rsi[i];
+    const e9 = model.ema9[i];
+    const e21 = model.ema21[i];
+    const macd = I.macd(closes, 12, 26, 9);
+    const hist = macd.hist[i];
+    const prevHist = macd.hist[i - 1];
+    const bb = I.bollinger(closes, 20, 2);
+    const upper = bb.upper[i];
+    const lower = bb.lower[i];
+    const basis = bb.basis[i];
+
+    // ---- signal summary: five factors, +-20 each (same scoring as before) ----
+    const factors = [];
+    let score = 0;
+    const add = (pts, label) => {
+      score += pts;
+      factors.push({ label, tone: pts > 0 ? "up" : pts < 0 ? "down" : "flat" });
+    };
+    if (!isNa(vwap)) add(price > vwap ? 20 : -20, price > vwap ? "Price above VWAP" : "Price below VWAP");
+    if (!isNa(rsi)) {
+      if (rsi < 40) add(20, `RSI ${fmtNum(rsi, 1)}, below 40`);
+      else if (rsi > 60) add(-20, `RSI ${fmtNum(rsi, 1)}, above 60`);
+      else add(0, `RSI ${fmtNum(rsi, 1)}, between 40 and 60`);
+    }
+    if (!isNa(e9) && !isNa(e21)) add(e9 > e21 ? 20 : -20, e9 > e21 ? "EMA 9 above EMA 21" : "EMA 9 below EMA 21");
+    if (!isNa(hist) && !isNa(prevHist)) {
+      if (hist > 0 && hist > prevHist) add(20, "MACD histogram rising above zero");
+      else if (hist < 0 && hist < prevHist) add(-20, "MACD histogram falling below zero");
+      else add(0, "MACD histogram turning");
+    }
+    if (!isNa(upper) && !isNa(lower)) {
+      if (price < lower) add(20, "Price below lower Bollinger Band");
+      else if (price > upper) add(-20, "Price above upper Bollinger Band");
+      else add(0, "Price inside Bollinger Bands");
+    }
+
+    const confidence = Math.abs(score);
+    let bias = score > 0 ? "Long bias" : score < 0 ? "Short bias" : "Neutral";
+    let biasTone = score > 0 ? "up" : score < 0 ? "down" : "flat";
+    if (confidence < 40) {
+      bias = "No clear bias";
+      biasTone = "flat";
+    }
+    const risk = confidence >= 80 ? "Strong agreement" : confidence >= 60 ? "Moderate agreement" : "Weak agreement";
+    $("sumBias").textContent = bias;
+    $("sumBias").dataset.tone = biasTone;
+    $("sumConf").textContent = `${confidence}% agreement`;
+    $("sumConfBar").style.transform = `scaleX(${confidence / 100})`;
+    $("sumConfBar").dataset.tone = biasTone;
+    $("sumRisk").textContent = risk;
+    const list = $("sumFactors");
+    const html = factors.map((f) => `<li data-tone="${f.tone}"><i></i>${f.label}</li>`).join("");
+    if (list.innerHTML !== html) list.innerHTML = html;
+
+    lastClassic = { price, vwap, rsi, ema9: e9, ema21: e21, hist, prevHist, upper, lower };
+    chartTfRead = model.mcb ? V.readTimeframe(model.mcb) : null;
+    renderVerdict();
+
+    // ---- signals ----
+    $("sgRsiVal").textContent = fmtNum(rsi, 2);
+    if (rsi < 30) setTag("sgRsi", "Oversold", "up");
+    else if (rsi > 70) setTag("sgRsi", "Overbought", "down");
+    else setTag("sgRsi", "Neutral", "flat");
+    $("sgEmaVal").textContent = isNa(e9) || isNa(e21) ? "\u2013" : `${e9 - e21 >= 0 ? "+" : ""}${fmtPrice(e9 - e21)}`;
+    if (isNa(e9) || isNa(e21)) setTag("sgEma", "\u2013", "flat");
+    else setTag("sgEma", e9 > e21 ? "Bullish" : "Bearish", e9 > e21 ? "up" : "down");
+    $("sgVwapVal").textContent = fmtPrice(vwap);
+    if (isNa(vwap)) setTag("sgVwap", "\u2013", "flat");
+    else setTag("sgVwap", price > vwap ? "Above" : "Below", price > vwap ? "up" : "down");
+    const m = model.mcb;
+    if (!m) {
+      $("sgWtVal").textContent = "\u2013";
+      setTag("sgWt", "MCB off", "flat");
+    }
+    const fast = m ? m.fast[i] : NaN;
+    if (m) $("sgWtVal").textContent = fmtNum(fast, 2);
+    let lastCross = -1;
+    for (let k = n - 1; m && k >= 0 && k >= n - 500; k--) {
+      if (m.buy[k] || m.sell[k]) {
+        lastCross = k;
+        break;
+      }
+    }
+    if (!m) {
+      // nothing more to show for WaveTrend
+    } else if (lastCross < 0) setTag("sgWt", "No cross", "flat");
+    else {
+      const ago = n - 1 - lastCross;
+      const up = m.buy[lastCross];
+      setTag("sgWt", `Cross ${up ? "up" : "down"} ${ago === 0 ? "now" : ago + (ago === 1 ? " bar ago" : " bars ago")}`, up ? "up" : "down");
+    }
+
+    // ---- order book pressure ----
+    if (lastBook && lastBook.bids.length && lastBook.asks.length) {
+      const bidVol = lastBook.bids.reduce((s, l) => s + l[1], 0);
+      const askVol = lastBook.asks.reduce((s, l) => s + l[1], 0);
+      const share = bidVol / (bidVol + askVol || 1);
+      const imbalance = Math.abs(share - 0.5) * 2;
+      let wall = null;
+      for (const l of lastBook.bids) if (!wall || l[1] > wall.q) wall = { q: l[1], p: l[0], side: "bid" };
+      for (const l of lastBook.asks) if (l[1] > wall.q) wall = { q: l[1], p: l[0], side: "ask" };
+      let text;
+      if (imbalance > 0.2) text = share > 0.5 ? "Bids outweigh asks in the top 20 levels." : "Asks outweigh bids in the top 20 levels.";
+      else text = "Bids and asks are roughly balanced in the top 20 levels.";
+      $("inBook").textContent = text;
+      $("inBookMeta").textContent = `Largest level: ${fmtQty(wall.q)} ${state.pair} ${wall.side} at ${fmtPrice(wall.p)} \u00b7 ${Math.round(share * 100)}% bids`;
+    }
+
+    // ---- activity: last closed bar vs the 20 before it ----
+    if (n > 22) {
+      const closedVol = bars[n - 2].volume;
+      let sum = 0;
+      for (let k = n - 22; k < n - 2; k++) sum += bars[k].volume;
+      const avg = sum / 20;
+      const ratio = avg > 0 ? closedVol / avg : NaN;
+      $("inVolBar").style.transform = `scaleX(${Math.min(1, (ratio || 0) / 3).toFixed(3)})`;
+      $("inVolBar").dataset.spike = String(ratio > 2.5);
+      const up = bars[n - 2].close >= bars[n - 2].open;
+      let text;
+      if (ratio > 2.5) text = `Volume spike on a ${up ? "rising" : "falling"} bar.`;
+      else if (ratio > 1.4) text = `Above-average volume on a ${up ? "rising" : "falling"} bar.`;
+      else if (ratio < 0.6) text = "Quiet: volume well below average.";
+      else text = "Normal volume.";
+      $("inVol").textContent = text;
+      $("inVolMeta").textContent = `Last closed bar ${fmtNum(ratio, 2)}x the 20-bar average`;
+    }
+
+    // ---- momentum ----
+    if (!isNa(hist) && !isNa(prevHist)) {
+      let text;
+      if (hist > 0) text = hist > prevHist ? "Bullish momentum is building." : "Bullish momentum is fading.";
+      else text = hist < prevHist ? "Bearish momentum is building." : "Bearish momentum is fading.";
+      $("inMacd").textContent = text;
+      $("inMacdMeta").textContent = `MACD ${fmtNum(macd.line[i], 4)} \u00b7 Signal ${fmtNum(macd.signal[i], 4)} \u00b7 Hist ${fmtNum(hist, 4)}`;
+    }
+
+    // ---- volatility ----
+    if (!isNa(upper)) {
+      const width = ((upper - lower) / basis) * 100;
+      let text;
+      if (width < 0.2) text = "Bands are very tight (squeeze). Volatility is compressed.";
+      else if (price > upper) text = "Price is above the upper band.";
+      else if (price < lower) text = "Price is below the lower band.";
+      else text = price > basis ? "Price is in the upper half of the bands." : "Price is in the lower half of the bands.";
+      $("inBb").textContent = text;
+      $("inBbMeta").textContent = `Upper ${fmtPrice(upper)} \u00b7 Lower ${fmtPrice(lower)} \u00b7 Width ${fmtNum(width, 2)}%`;
+    }
+  }
+
+  // ---------------------------------------------------------------- Pulse verdict + market data
+  const V = window.PulseVerdict;
+  let lastClassic = null;
+  let chartTfRead = null;
+  const mtfBars = {};
+  const mtfReads = {};
+  let fng = null;
+  let fundamentalsData = null;
+  let newsData = null;
+  let verdictAt = 0;
+
+  function recomputeMtf() {
+    for (const tf in mtfBars) mtfReads[tf] = V.readTimeframe(I.marketCipherB(mtfBars[tf], state.mcb));
+  }
+
+  function resetMarketData() {
+    for (const k in mtfBars) delete mtfBars[k];
+    for (const k in mtfReads) delete mtfReads[k];
+    fundamentalsData = null;
+    newsData = null;
+    renderVerdict(true);
+    renderMarket();
+  }
+
+  const market = PulseMarket.create({
+    onKlines(tf, bars) {
+      mtfBars[tf] = bars;
+      mtfReads[tf] = V.readTimeframe(I.marketCipherB(bars, state.mcb));
+      renderVerdict(true);
+    },
+    onFearGreed(v) {
+      fng = v;
+      renderVerdict(true);
+      renderMarket();
+    },
+    onFundamentals(v) {
+      fundamentalsData = v;
+      renderVerdict(true);
+      renderMarket();
+    },
+    onNews(v) {
+      newsData = v;
+      renderVerdict(true);
+      renderMarket();
+    },
+    onError(what, err) {
+      console.warn(`[market] ${what}`, err);
+      if (what === "news" && !newsData) {
+        newsData = { error: true, items: [], summary: null };
+        renderMarket();
+      }
+    },
   });
-  insightsVolWindow.length = 0;
 
-  if (mainSeries) mainSeries.setData([]);
-  if (chart) chart.timeScale().fitContent();
-  document.getElementById("streamOverlay").classList.remove("hidden");
+  const toneOf = (s) => (s > 0.15 ? "up" : s < -0.15 ? "down" : "flat");
+  const signed = (v) => (v === null || isNa(v) ? "\u2013" : `${v >= 0 ? "+" : ""}${Math.round(v * 100)}`);
+  const agoText = (n) => (n === 0 ? "now" : n === 1 ? "1 bar ago" : `${n} bars ago`);
 
-  setTimeout(startStream, 100);
-}
+  function verdictParts() {
+    const classic = lastClassic ? V.readClassic(lastClassic) : null;
+    return {
+      technical: V.technical(mtfReads, classic),
+      sentiment: V.sentiment(fng),
+      news: newsData && newsData.summary && newsData.summary.sample ? newsData.summary.score : null,
+      fundamentals: V.fundamentals(fundamentalsData),
+    };
+  }
 
-document.getElementById("timeframeBtn").onclick = (e) => {
-  e.stopPropagation();
-  document.getElementById("timeframeMenu").classList.toggle("open");
-};
-document.querySelectorAll(".tf-opt").forEach((btn) => {
-  btn.onclick = (e) => {
-    const tf = e.target.getAttribute("data-val");
-    document.getElementById("activeTimeframeText").textContent = tf;
-    document.getElementById("timeframeMenu").classList.remove("open");
-    switchTimeframe(tf);
-  };
-});
+  function tfTally() {
+    const t = { ready: 0, bull: 0, bear: 0, flat: 0, oversold: 0, overbought: 0 };
+    for (const tf of PulseMarket.MTF) {
+      const r = mtfReads[tf];
+      if (!r || !r.ready) continue;
+      t.ready++;
+      if (r.bias === "Bullish") t.bull++;
+      else if (r.bias === "Bearish") t.bear++;
+      else t.flat++;
+      if (r.zone.score > 0) t.oversold++;
+      if (r.zone.score < 0) t.overbought++;
+    }
+    return t;
+  }
 
-// indicator toggle buttons
-document.getElementById("btn-vwap").onclick = () =>
-  toggleIndicator("vwap", "btn-vwap", vwapSeries);
-document.getElementById("btn-ema").onclick = () =>
-  toggleIndicator("ema", "btn-ema", [ema9Series, ema21Series]);
-document.getElementById("btn-rsi").onclick = () =>
-  toggleIndicator("rsi", "btn-rsi", rsiSeries);
-document.getElementById("btn-vol").onclick = () =>
-  toggleIndicator("vol", "btn-vol", volumeSeries);
+  function renderVerdict(force) {
+    if (!insightsVisible()) return;
+    const now = Date.now();
+    if (!force && now - verdictAt < 500) return;
+    verdictAt = now;
 
-// -- VPVR toggle + settings --
-document.getElementById("btn-vpvr").onclick = () => {
-  vpvrSettings.enabled = !vpvrSettings.enabled;
-  document
-    .getElementById("btn-vpvr")
-    .classList.toggle("active", vpvrSettings.enabled);
-  if (vpvrView) vpvrView.setSettings({ enabled: vpvrSettings.enabled });
-};
-document.getElementById("vpvrSettingsBtn").onclick = (e) => {
-  e.stopPropagation();
-  document.getElementById("vpvrMenu").classList.toggle("open");
-};
-const _vpvrModeBtns = document.querySelectorAll("#vpvrMode button");
-_vpvrModeBtns.forEach((b) => {
-  b.onclick = (e) => {
+    const parts = verdictParts();
+    const tally = tfTally();
+    const ov = V.overall(parts, { zones: { ready: tally.ready, oversold: tally.oversold, overbought: tally.overbought } });
+    const hero = $("vdHero");
+    const lv = ov ? V.levels(model.bars, ov.action) : null;
+
+    if (!ov) {
+      hero.dataset.tone = "flat";
+      $("vdAction").textContent = "Loading";
+      $("vdBias").textContent = "Reading data";
+      $("vdScore").textContent = "\u2013";
+      $("vdNote").textContent = "Fetching timeframes, sentiment, news and fundamentals\u2026";
+    } else {
+      const tone = ov.action === "Long" ? "up" : ov.action === "Short" ? "down" : "flat";
+      hero.dataset.tone = tone;
+      hero.dataset.bias = toneOf(ov.score);
+      $("vdAction").textContent = ov.action;
+      $("vdBias").textContent = `${ov.bias} bias`;
+      $("vdScore").textContent = `Score ${signed(ov.score)}`;
+      $("vdAgree").textContent = `${ov.agree} of ${ov.total} parts agree`;
+      $("vdMark").style.left = `${((ov.score + 1) / 2) * 100}%`;
+
+      // one plain sentence: what to do and why
+      const tfs = tally.ready ? `${tally.bull} of ${tally.ready} timeframes bullish, ${tally.bear} bearish` : "timeframes still loading";
+      let note;
+      if (ov.action === "Long") note = `Buyers in control: ${tfs}. The idea fails below ${fmtPrice(lv ? lv.stop : NaN)}.`;
+      else if (ov.action === "Short") note = `Sellers in control: ${tfs}. The idea fails above ${fmtPrice(lv ? lv.stop : NaN)}.`;
+      else if (ov.note) note = `${ov.note}.`;
+      else note = `No clear edge: ${tfs}. Wait for the timeframes to line up.`;
+      $("vdNote").textContent = note;
+    }
+
+    for (const li of $("vdParts").children) {
+      const v = parts[li.dataset.part];
+      const bar = li.querySelector("i");
+      li.querySelector("b").textContent = v === null ? "n/a" : signed(v);
+      li.dataset.tone = v === null ? "off" : toneOf(v);
+      bar.dataset.side = v !== null && v < 0 ? "neg" : "pos";
+      bar.style.transform = `scaleX(${v === null ? 0 : Math.abs(v).toFixed(3)})`;
+    }
+
+    $("vdEntry").textContent = lv ? fmtPrice(lv.entry) : "\u2013";
+    $("vdStop").textContent = lv ? fmtPrice(lv.stop) : "\u2013";
+    $("vdTarget").textContent = lv ? fmtPrice(lv.target) : "\u2013";
+    $("vdLevels").hidden = !lv;
+    $("vdNoLevels").hidden = !!lv;
+
+    $("tfTally").textContent = tally.ready ? `${tally.bull} up \u00b7 ${tally.bear} down \u00b7 ${tally.flat} flat` : "\u2013";
+    renderTfTable();
+  }
+
+  const shortAgo = (n) => (n === 0 ? "now" : n === 1 ? "1 bar" : `${n} bars`);
+
+  function renderTfTable() {
+    const list = $("tfRows");
+    const rows = PulseMarket.MTF.map((tf) => ({ tf, read: mtfReads[tf], bars: mtfBars[tf], chart: tf === state.tf }));
+    if (!PulseMarket.MTF.includes(state.tf)) rows.unshift({ tf: state.tf, read: chartTfRead, bars: model.bars, chart: true });
+    if (list.children.length !== rows.length) {
+      list.innerHTML = "";
+      for (let k = 0; k < rows.length; k++) {
+        const li = document.createElement("li");
+        li.className = "tf-row";
+        li.innerHTML =
+          '<span class="tf-name num"></span>' +
+          '<span class="wmeter"><span class="wmeter-zero"></span><i></i></span>' +
+          '<span class="tf-dot"><i class="dot"></i><span></span></span>' +
+          '<span class="tag tag-strong"></span>';
+        list.appendChild(li);
+      }
+    }
+    rows.forEach((r, k) => {
+      const li = list.children[k];
+      const [name, meter, dot, act] = li.children;
+      name.textContent = r.tf;
+      li.dataset.chart = String(r.chart);
+      const marker = meter.querySelector("i");
+      const dotGlyph = dot.firstChild;
+      const dotText = dot.lastChild;
+      const rd = r.read;
+      if (!rd || !rd.ready) {
+        marker.hidden = true;
+        dotGlyph.className = "dot dot-none";
+        const n = r.bars ? r.bars.length : 0;
+        dotText.textContent = !rd ? "Loading" : `${n} bars`;
+        act.textContent = !rd ? "\u2013" : "n/a";
+        act.dataset.tone = "flat";
+        li.dataset.tip = !rd
+          ? `${r.tf}: loading from Binance.`
+          : `${r.tf}: only ${n} bars of history on Binance. Market Cipher B needs about 30 for the waves and 83 for every line.`;
+        li.setAttribute("aria-label", `${r.tf}: not enough data`);
+        return;
+      }
+      const pos = (Math.max(-100, Math.min(100, rd.fast)) + 100) / 2;
+      marker.hidden = false;
+      marker.style.left = `${pos}%`;
+      marker.dataset.tone = rd.zone.score > 0 ? "up" : rd.zone.score < 0 ? "down" : "flat";
+      if (rd.dot) {
+        dotGlyph.className = `dot ${{ buy: "dot-g", sell: "dot-r", buySignal: "dot-G", sellSignal: "dot-R" }[rd.dot.type]}`;
+        dotText.textContent = shortAgo(rd.dot.ago);
+      } else {
+        dotGlyph.className = "dot dot-none";
+        dotText.textContent = "none";
+      }
+      act.textContent = rd.action;
+      act.dataset.tone = rd.action === "Long" ? "up" : rd.action === "Short" ? "down" : "flat";
+      const dotSentence = rd.dot ? `${rd.dot.label} ${agoText(rd.dot.ago)}` : "No dot in the last 12 bars";
+      li.dataset.tip = `${r.tf}${r.chart ? " (chart)" : ""}: ${rd.bias}, score ${signed(rd.score)}. Wave ${fmtNum(rd.fast, 1)} (${rd.zone.label.toLowerCase()}). ${dotSentence}. ${rd.reasons.slice(1).join(". ")}${rd.reasons.length > 1 ? "." : ""}`;
+      li.setAttribute("aria-label", `${r.tf}: ${rd.action}, ${rd.bias}, ${rd.zone.label}, ${dotSentence}`);
+    });
+  }
+  function timeAgo(ms) {
+    const s = Math.max(0, (Date.now() - ms) / 1000);
+    if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`;
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+  }
+
+  function renderMarket() {
+    if (isMobile() ? mobileView !== "market" : !(state.panelOpen && state.panel === "market")) return;
+
+    // ---- sentiment ----
+    if (fng) {
+      $("fgValue").textContent = fng.value;
+      $("fgLabel").textContent = fng.label;
+      $("fgLabel").dataset.tone = fng.value >= 55 ? "up" : fng.value <= 45 ? "down" : "flat";
+      $("fgMark").style.left = `${fng.value}%`;
+      $("fgUpdated").textContent = new Date(fng.time * 1000).toISOString().slice(0, 10);
+      const hist = $("fgHistory");
+      hist.innerHTML = "";
+      fng.history.slice(0, 7).reverse().forEach((h) => {
+        const b = document.createElement("span");
+        b.style.setProperty("--h", `${Math.max(6, h.value)}%`);
+        b.dataset.tone = h.value >= 55 ? "up" : h.value <= 45 ? "down" : "flat";
+        b.dataset.tip = `${new Date(h.time * 1000).toISOString().slice(5, 10)}: ${h.value} (${h.label})`;
+        hist.appendChild(b);
+      });
+    }
+
+    // ---- news ----
+    const list = $("newsList");
+    if (newsData) {
+      list.innerHTML = "";
+      if (newsData.error || !newsData.items.length) {
+        const li = document.createElement("li");
+        li.className = "news-empty";
+        li.textContent = newsData.error
+          ? "Headlines are unavailable. They load from /api/news, so run the site with `node scripts/dev.js` locally or deploy to Vercel."
+          : "No recent headlines.";
+        list.appendChild(li);
+        $("newsTally").textContent = "\u2013";
+      } else {
+        const s = newsData.summary;
+        $("newsTally").textContent = `${s.bullish} up \u00b7 ${s.bearish} down \u00b7 ${s.neutral} flat`;
+        for (const it of newsData.items.slice(0, 14)) {
+          if (!/^https?:\/\//.test(it.url)) continue;
+          const li = document.createElement("li");
+          li.className = "news-item";
+          const a = document.createElement("a");
+          a.href = it.url;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = it.title;
+          const meta = document.createElement("span");
+          meta.className = "news-meta";
+          meta.textContent = `${it.source} \u00b7 ${it.published ? timeAgo(it.published) : ""}${it.coinSpecific ? "" : " \u00b7 market"}`;
+          const tag = document.createElement("span");
+          tag.className = "tag";
+          tag.dataset.tone = it.tag === "bullish" ? "up" : it.tag === "bearish" ? "down" : "flat";
+          tag.textContent = it.tag === "bullish" ? "Bullish" : it.tag === "bearish" ? "Bearish" : "Neutral";
+          li.append(a, meta, tag);
+          list.appendChild(li);
+        }
+      }
+    }
+
+    // ---- fundamentals ----
+    const f = fundamentalsData;
+    if (f) {
+      $("fdRank").textContent = f.rank ? `Rank #${f.rank}` : "\u2013";
+      $("fdMcap").textContent = "$" + fmtCompact(f.marketCap);
+      $("fdFdv").textContent = isNa(f.fdv) ? "\u2013" : "$" + fmtCompact(f.fdv);
+      $("fdTurnover").textContent = f.marketCap ? `${fmtNum((f.volume / f.marketCap) * 100, 2)}%` : "\u2013";
+      $("fdSupply").textContent = f.max ? `${fmtNum((f.circulating / f.max) * 100, 1)}% of max` : `${fmtCompact(f.circulating)} (no max)`;
+      $("fdAth").textContent = fmtPct(f.athChange);
+      $("fdAth").dataset.dir = f.athChange >= 0 ? "up" : "down";
+      $("fdTrend").textContent = `${fmtPct(f.change7d)} / ${fmtPct(f.change30d)}`;
+    }
+  }
+
+  // ---------------------------------------------------------------- tooltips
+  const tipEl = $("tip");
+  let tipTarget = null;
+  let tipTimer = 0;
+  let tipHiddenAt = 0;
+
+  function showTip(el) {
+    const text = el.getAttribute("data-tip");
+    if (!text) return;
+    tipEl.textContent = text;
+    tipEl.hidden = false;
+    const r = el.getBoundingClientRect();
+    const w = tipEl.offsetWidth;
+    const h = tipEl.offsetHeight;
+    let top = r.top - h - 8;
+    if (top < 6) top = r.bottom + 8;
+    const left = Math.max(6, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 6));
+    tipEl.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+  }
+  function hideTip() {
+    clearTimeout(tipTimer);
+    if (!tipEl.hidden) tipHiddenAt = Date.now();
+    tipEl.hidden = true;
+    tipTarget = null;
+  }
+  function armTip(el) {
+    if (el === tipTarget) return;
+    clearTimeout(tipTimer);
+    tipTarget = el;
+    // after one tip was open, the next opens without delay
+    const delay = Date.now() - tipHiddenAt < 400 || !tipEl.hidden ? 0 : 450;
+    tipTimer = setTimeout(() => tipTarget === el && showTip(el), delay);
+  }
+  document.addEventListener("pointerover", (e) => {
+    if (e.pointerType === "touch") return;
+    const el = e.target.closest("[data-tip]");
+    if (el) armTip(el);
+    else if (tipTarget) hideTip();
+  });
+  document.addEventListener("focusin", (e) => {
+    const el = e.target.closest && e.target.closest("[data-tip]");
+    if (el && e.target.matches(":focus-visible")) armTip(el);
+  });
+  document.addEventListener("focusout", hideTip);
+  document.addEventListener("pointerdown", hideTip);
+  window.addEventListener("scroll", hideTip, true);
+
+  // ---------------------------------------------------------------- about
+  const about = $("aboutPop");
+  function toggleAbout(open) {
+    about.hidden = !open;
+    $("aboutBtn").setAttribute("aria-expanded", String(open));
+  }
+  $("aboutBtn").addEventListener("click", (e) => {
     e.stopPropagation();
-    _vpvrModeBtns.forEach((x) => x.classList.remove("active"));
-    b.classList.add("active");
-    vpvrSettings.mode = b.getAttribute("data-mode");
-    if (vpvrView) vpvrView.setSettings({ mode: vpvrSettings.mode });
-  };
-});
-const _vpvrRows = document.getElementById("vpvrRows");
-_vpvrRows.oninput = () => {
-  const v = parseInt(_vpvrRows.value, 10);
-  vpvrSettings.rows = v;
-  document.getElementById("vpvrRowsVal").textContent = v;
-  if (vpvrView) vpvrView.setSettings({ rows: v });
-};
-const _vpvrVa = document.getElementById("vpvrVa");
-_vpvrVa.oninput = () => {
-  const v = parseInt(_vpvrVa.value, 10);
-  vpvrSettings.vaPct = v / 100;
-  document.getElementById("vpvrVaVal").textContent = v;
-  if (vpvrView) vpvrView.setSettings({ vaPct: v / 100 });
-};
-const _vpvrWidth = document.getElementById("vpvrWidth");
-_vpvrWidth.oninput = () => {
-  const v = parseInt(_vpvrWidth.value, 10);
-  vpvrSettings.widthPx = v;
-  document.getElementById("vpvrWidthVal").textContent = v;
-  if (vpvrView) vpvrView.setSettings({ widthPx: v });
-};
-document.getElementById("vpvrPOC").onchange = (e) => {
-  vpvrSettings.showPOC = e.target.checked;
-  if (vpvrView) vpvrView.setSettings({ showPOC: e.target.checked });
-};
-document.getElementById("vpvrVAHVAL").onchange = (e) => {
-  vpvrSettings.showVAHVAL = e.target.checked;
-  if (vpvrView) vpvrView.setSettings({ showVAHVAL: e.target.checked });
-};
-document.getElementById("vpvrVAHL").onchange = (e) => {
-  vpvrSettings.showVA = e.target.checked;
-  if (vpvrView) vpvrView.setSettings({ showVA: e.target.checked });
-};
-document.getElementById("btn-fit").onclick = () => {
-  if (chart) chart.timeScale().fitContent();
-};
-document.getElementById("btn-reset").onclick = () => {
-  if (chart) chart.timeScale().resetTimeScale();
-};
-
-document.getElementById("btn-insights").onclick = () => {
-  const panel = document.getElementById("liveInsightsPanel");
-  const btn = document.getElementById("btn-insights");
-  const hidden = panel.classList.toggle("hidden");
-  btn.classList.toggle("active", !hidden);
-};
-document.getElementById("li-close-btn").onclick = () => {
-  document.getElementById("liveInsightsPanel").classList.add("hidden");
-  document.getElementById("btn-insights").classList.remove("active");
-};
-document.addEventListener("keydown", (e) => {
-  if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
-    e.preventDefault();
-    document.getElementById("tokenSearch").focus();
-  }
-});
-
-document.getElementById("tokenSearch").addEventListener("input", (e) => {
-  const q = e.target.value.toUpperCase();
-  const btns = document.querySelectorAll(".pair-btn");
-  btns.forEach((b) => {
-    if (b.textContent.toUpperCase().includes(q)) b.style.display = "flex";
-    else b.style.display = "none";
+    toggleAbout(about.hidden);
   });
-});
+  document.addEventListener("pointerdown", (e) => {
+    if (!about.hidden && !about.contains(e.target) && !e.target.closest("#aboutBtn")) toggleAbout(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !about.hidden) {
+      toggleAbout(false);
+      $("aboutBtn").focus();
+    }
+  });
 
-const toolbar = document.getElementById("mainToolbar");
-let isDragging = false,
-  offsetX,
-  offsetY;
-const isTouchDevice = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
-if (!isTouchDevice) {
-  toolbar.addEventListener("mousedown", (e) => {
-    if (
-      e.target.closest(
-        "button, input, .clean-dropdown, .pair-btn, .search-container",
-      )
-    )
+  // ---------------------------------------------------------------- alerts (Market Cipher B)
+  const alerted = new Set();
+  function checkAlerts(i) {
+    if (i < 0 || !state.ind.mcb || !model.mcb || i >= model.bars.length) return;
+    if (!state.alerts.inApp && !state.alerts.notify) return;
+    const m = model.mcb;
+    const bar = model.bars[i];
+    for (const a of MCB_ALERTS) {
+      if (!m[a.key][i]) continue;
+      const id = `${state.pair}|${state.tf}|${bar.time}|${a.key}`;
+      if (alerted.has(id)) continue;
+      alerted.add(id);
+      const body = `${state.pair}-USDT ${state.tf} \u00b7 close ${fmtPrice(bar.close)}`;
+      if (state.alerts.inApp) toast(a.title, body, a.tone);
+      if (state.alerts.notify && "Notification" in window && Notification.permission === "granted") {
+        try {
+          new Notification(`Market Cipher B: ${a.title}`, { body, icon: "icons/favicon.svg", tag: id });
+        } catch (_) {}
+      }
+    }
+  }
+
+  function toast(title, body, tone) {
+    const host = $("toasts");
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.dataset.tone = tone;
+    el.setAttribute("role", "status");
+    el.innerHTML = `<svg class="ic"><use href="#i-bell" /></svg><div><strong></strong><span class="num"></span></div><button type="button" class="icon-btn" aria-label="Dismiss"><svg class="ic"><use href="#i-x" /></svg></button>`;
+    el.querySelector("strong").textContent = title;
+    el.querySelector("span").textContent = body;
+    let timer = 0;
+    const dismiss = () => {
+      clearTimeout(timer);
+      el.classList.add("is-leaving");
+      setTimeout(() => el.remove(), 160);
+    };
+    const arm = () => (timer = setTimeout(dismiss, 8000));
+    el.querySelector("button").addEventListener("click", dismiss);
+    el.addEventListener("pointerenter", () => clearTimeout(timer));
+    el.addEventListener("pointerleave", arm);
+    host.appendChild(el);
+    const maxToasts = isMobile() ? 2 : 4;
+    while (host.children.length > maxToasts) host.firstElementChild.remove();
+    arm();
+  }
+
+  // ---------------------------------------------------------------- status bar
+  function renderStatus(s) {
+    const el = $("connState");
+    el.dataset.state = s.state;
+    const txt = $("connText");
+    if (s.state === "live") txt.textContent = "Live";
+    else if (s.state === "connecting") txt.textContent = "Connecting";
+    else if (s.state === "reconnecting") txt.textContent = s.retryIn ? `Reconnecting in ${Math.round(s.retryIn / 1000)}s` : "Reconnecting";
+    else txt.textContent = s.retryIn ? `Offline, retry in ${Math.round(s.retryIn / 1000)}s` : "Offline";
+  }
+
+  function tickClock() {
+    $("utcClock").textContent = new Date(feed.serverNow()).toISOString().slice(11, 19) + " UTC";
+  }
+  setInterval(tickClock, 1000);
+  tickClock();
+
+  // ---------------------------------------------------------------- panel
+  const PANEL_TABS = ["book", "signal", "market"];
+  function renderPanel() {
+    $("app").dataset.panel = state.panelOpen ? "open" : "closed";
+    $("panelBtn").setAttribute("aria-pressed", String(state.panelOpen));
+    for (const tab of PANEL_TABS) {
+      $(`tab-${tab}`).setAttribute("aria-selected", String(state.panel === tab));
+      $(`view-${tab}`).hidden = state.panel !== tab;
+    }
+    if (state.panel === "signal") updateInsights(true);
+    if (state.panel === "market") renderMarket();
+  }
+
+  function setPanelTab(tab) {
+    state.panel = tab;
+    state.panelOpen = true;
+    renderPanel();
+    save();
+  }
+
+  document.querySelectorAll(".panel-tabs [data-tab]").forEach((b) => b.addEventListener("click", () => setPanelTab(b.dataset.tab)));
+  $("panelBtn").addEventListener("click", () => {
+    state.panelOpen = !state.panelOpen;
+    renderPanel();
+    save();
+  });
+  $("panelClose").addEventListener("click", () => {
+    if (isMobile()) setMobileView("chart");
+    else {
+      state.panelOpen = false;
+      renderPanel();
+      save();
+    }
+  });
+
+  // tab keyboard: left/right arrows move between tabs
+  $("panel").querySelector(".panel-tabs").addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const i = PANEL_TABS.indexOf(state.panel);
+    const next = PANEL_TABS[(i + (e.key === "ArrowRight" ? 1 : PANEL_TABS.length - 1)) % PANEL_TABS.length];
+    setPanelTab(next);
+    $(`tab-${next}`).focus();
+  });
+
+  // ---------------------------------------------------------------- mobile views
+  const mq = window.matchMedia("(max-width: 900px)");
+  const isMobile = () => mq.matches;
+  let mobileView = "chart";
+
+  function setMobileView(view) {
+    if (view === "indicators") {
+      openMenu($("indicatorsBtn"));
       return;
-    isDragging = true;
-    const rect = toolbar.getBoundingClientRect();
-    offsetX = e.clientX - rect.left;
-    offsetY = e.clientY - rect.top;
-    toolbar.style.cursor = "grabbing";
-    if (!toolbar.style.left || toolbar.style.left.includes("%")) {
-      toolbar.style.left = rect.left + "px";
-      toolbar.style.top = rect.top + "px";
-      toolbar.style.transform = "none";
+    }
+    mobileView = view;
+    $("app").dataset.mobileView = view;
+    document.querySelectorAll(".mobile-nav [data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
+    if (PANEL_TABS.includes(view)) {
+      state.panel = view;
+      renderPanel();
+    }
+  }
+  document.querySelectorAll(".mobile-nav [data-view]").forEach((b) => b.addEventListener("click", () => setMobileView(b.dataset.view)));
+  $("app").dataset.mobileView = "chart";
+  mq.addEventListener("change", () => {
+    chartView.relayout();
+    queuePaneLayout();
+  });
+
+  // ---------------------------------------------------------------- indicators menu
+  const menu = $("indMenu");
+  let menuAnchor = null;
+
+  function renderIndicatorMenu() {
+    const list = $("indList");
+    if (!list.children.length) {
+      for (const ind of INDICATORS) {
+        const li = document.createElement("li");
+        li.className = "ind-row";
+        li.innerHTML =
+          `<label class="switch-row"><input type="checkbox" role="switch" data-ind="${ind.key}" />` +
+          `<span class="switch" aria-hidden="true"></span>` +
+          `<span class="ind-name">${ind.name}${ind.note ? `<em>${ind.note}</em>` : ""}</span></label>` +
+          `<button type="button" class="icon-btn" data-help="${ind.key}" aria-expanded="false" aria-controls="help-${ind.key}" aria-label="What is ${ind.name}?"><svg class="ic"><use href="#i-help" /></svg></button>` +
+          (ind.settings
+            ? `<button type="button" class="icon-btn" data-settings="${ind.settings}" aria-label="${ind.name} settings" data-tip="Settings"><svg class="ic"><use href="#i-sliders" /></svg></button>`
+            : '<span class="icon-spacer"></span>') +
+          `<p class="ind-help" id="help-${ind.key}" hidden>${ind.desc}</p>`;
+        list.appendChild(li);
+      }
+      list.addEventListener("change", (e) => {
+        const input = e.target.closest("input[data-ind]");
+        if (input) toggleIndicator(input.dataset.ind, input.checked);
+      });
+      list.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-settings]");
+        if (b) showMenuView(b.dataset.settings);
+        const h = e.target.closest("[data-help]");
+        if (h) {
+          const p = $(`help-${h.dataset.help}`);
+          p.hidden = !p.hidden;
+          h.setAttribute("aria-expanded", String(!p.hidden));
+        }
+      });
+    }
+    list.querySelectorAll("input[data-ind]").forEach((i) => (i.checked = !!state.ind[i.dataset.ind]));
+    const on = INDICATORS.filter((i) => state.ind[i.key]).length;
+    $("indCount").textContent = `${on}/${INDICATORS.length}`;
+  }
+
+  function showMenuView(id) {
+    for (const v of menu.querySelectorAll(".menu-view")) v.hidden = v.id !== id;
+    if (id === "menuMcb") fillMcbForm();
+    if (id === "menuVpvr") fillVpvrForm();
+    const first = menu.querySelector(`#${id} input, #${id} button`);
+    if (first) first.focus({ preventScroll: true });
+  }
+  menu.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", () => showMenuView("menuMain")));
+
+  function positionMenu() {
+    if (!menuAnchor || isMobile()) {
+      menu.style.left = menu.style.top = "";
+      return;
+    }
+    const r = menuAnchor.getBoundingClientRect();
+    const w = menu.offsetWidth;
+    menu.style.top = `${Math.round(r.bottom + 6)}px`;
+    menu.style.left = `${Math.round(Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)))}px`;
+  }
+
+  function openMenu(anchor, view) {
+    menuAnchor = anchor;
+    menu.hidden = false;
+    showMenuView(view || "menuMain");
+    positionMenu();
+    $("indicatorsBtn").setAttribute("aria-expanded", "true");
+  }
+  function closeMenu() {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    $("indicatorsBtn").setAttribute("aria-expanded", "false");
+    if (isMobile()) setMobileView(mobileView === "indicators" ? "chart" : mobileView);
+  }
+  $("indicatorsBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (menu.hidden) openMenu(e.currentTarget);
+    else closeMenu();
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (menu.hidden) return;
+    if (menu.contains(e.target) || e.target.closest("#indicatorsBtn") || e.target.closest('.mobile-nav [data-view="indicators"]')) return;
+    closeMenu();
+  });
+  window.addEventListener("resize", positionMenu);
+
+  // ---- MCB settings form ----
+  const mcbForm = $("mcbForm");
+  function fillMcbForm() {
+    for (const el of mcbForm.elements) {
+      if (!el.name) continue;
+      if (el.name === "alertsInApp") el.checked = !!state.alerts.inApp;
+      else if (el.name === "alertsNotify") el.checked = !!state.alerts.notify;
+      else if (el.type === "checkbox") el.checked = !!state.mcb[el.name];
+      else el.value = state.mcb[el.name];
+    }
+  }
+  let mcbTimer = 0;
+  mcbForm.addEventListener("input", (e) => {
+    const el = e.target;
+    if (!el.name) return;
+    if (el.name === "alertsInApp") {
+      state.alerts.inApp = el.checked;
+      save();
+      return;
+    }
+    if (el.name === "alertsNotify") {
+      if (el.checked && "Notification" in window && Notification.permission !== "granted") {
+        Notification.requestPermission().then((p) => {
+          state.alerts.notify = p === "granted";
+          el.checked = state.alerts.notify;
+          if (p !== "granted") toast("Notifications are blocked", "Allow notifications for this site in your browser settings.", "flat");
+          save();
+        });
+        return;
+      }
+      state.alerts.notify = el.checked;
+      save();
+      return;
+    }
+    if (el.type === "checkbox") state.mcb[el.name] = el.checked;
+    else {
+      const v = Math.floor(+el.value);
+      if (!(v >= 1)) {
+        el.setAttribute("aria-invalid", "true");
+        return; // minval=1, as in the script
+      }
+      el.removeAttribute("aria-invalid");
+      state.mcb[el.name] = v;
+    }
+    clearTimeout(mcbTimer);
+    mcbTimer = setTimeout(applyIndicators, 120);
+  });
+  $("mcbReset").addEventListener("click", () => {
+    state.mcb = Object.assign({}, I.MCB_DEFAULTS);
+    fillMcbForm();
+    applyIndicators();
+  });
+
+  // ---- VPVR settings form ----
+  function fillVpvrForm() {
+    const s = state.vpvr;
+    for (const b of $("vpvrMode").children) b.setAttribute("aria-checked", String(b.dataset.mode === s.mode));
+    $("vpvrRows").value = s.rows;
+    $("vpvrRowsVal").textContent = s.rows;
+    $("vpvrVa").value = Math.round(s.vaPct * 100);
+    $("vpvrVaVal").textContent = `${Math.round(s.vaPct * 100)}%`;
+    $("vpvrWidth").value = s.widthPx;
+    $("vpvrWidthVal").textContent = `${s.widthPx} px`;
+    $("vpvrPOC").checked = s.showPOC;
+    $("vpvrVAHVAL").checked = s.showVAHVAL;
+    $("vpvrVAHL").checked = s.showVA;
+  }
+  function setVpvr(partial) {
+    Object.assign(state.vpvr, partial);
+    if (vpvrView) vpvrView.setSettings(partial);
+    save();
+  }
+  $("vpvrMode").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-mode]");
+    if (!b) return;
+    setVpvr({ mode: b.dataset.mode });
+    fillVpvrForm();
+  });
+  $("vpvrRows").addEventListener("input", (e) => {
+    setVpvr({ rows: +e.target.value });
+    $("vpvrRowsVal").textContent = e.target.value;
+  });
+  $("vpvrVa").addEventListener("input", (e) => {
+    setVpvr({ vaPct: +e.target.value / 100 });
+    $("vpvrVaVal").textContent = `${e.target.value}%`;
+  });
+  $("vpvrWidth").addEventListener("input", (e) => {
+    setVpvr({ widthPx: +e.target.value });
+    $("vpvrWidthVal").textContent = `${e.target.value} px`;
+  });
+  $("vpvrPOC").addEventListener("change", (e) => setVpvr({ showPOC: e.target.checked }));
+  $("vpvrVAHVAL").addEventListener("change", (e) => setVpvr({ showVAHVAL: e.target.checked }));
+  $("vpvrVAHL").addEventListener("change", (e) => setVpvr({ showVA: e.target.checked }));
+
+  // ---------------------------------------------------------------- command palette
+  const palette = $("palette");
+  const pInput = $("paletteInput");
+  const pList = $("paletteList");
+  let pItems = [];
+  let pActive = 0;
+
+  function commands() {
+    const out = [];
+    for (const p of PAIRS) {
+      const mini = miniCache[p];
+      out.push({
+        group: "Pairs",
+        label: `${p}-USDT`,
+        hint: mini ? `${fmtPrice(mini.last, p)}  ${fmtPct(mini.changePct)}` : "",
+        icon: coinIcon(p),
+        keys: `${p} ${p}usdt pair`,
+        active: p === state.pair,
+        run: () => switchPair(p),
+      });
+    }
+    for (const tf of TIMEFRAMES) out.push({ group: "Timeframe", label: `Timeframe ${tf}`, keys: `tf interval ${tf}`, active: tf === state.tf, run: () => switchTimeframe(tf) });
+    for (const t in CHART_TYPES) out.push({ group: "Chart type", label: CHART_TYPES[t], keys: `chart type ${t}`, active: t === state.chartType, run: () => switchChartType(t) });
+    for (const ind of INDICATORS) {
+      out.push({
+        group: "Indicators",
+        label: `${state.ind[ind.key] ? "Hide" : "Show"} ${ind.name}`,
+        keys: `indicator toggle ${ind.key} ${ind.name}`,
+        hint: state.ind[ind.key] ? "On" : "Off",
+        run: () => toggleIndicator(ind.key),
+      });
+      if (ind.settings) {
+        out.push({
+          group: "Indicators",
+          label: `${ind.name} settings`,
+          keys: `settings ${ind.key} ${ind.name} inputs`,
+          run: () => {
+            if (!state.ind[ind.key]) toggleIndicator(ind.key, true);
+            openMenu($("indicatorsBtn"), ind.settings);
+          },
+        });
+      }
+    }
+    out.push({ group: "View", label: state.theme === "dark" ? "Switch to light theme" : "Switch to dark theme", keys: "theme dark light", run: () => applyTheme(state.theme === "dark" ? "light" : "dark") });
+    out.push({ group: "View", label: "Fit all bars", keys: "fit zoom", run: () => chartView.fit() });
+    out.push({ group: "View", label: "Reset chart view", keys: "reset zoom", run: () => chartView.reset() });
+    out.push({ group: "View", label: "Jump to latest bar", keys: "live realtime latest", run: () => chartView.scrollToRealtime() });
+    out.push({ group: "View", label: "Show order book", keys: "book depth orderbook panel", run: () => (isMobile() ? setMobileView("book") : setPanelTab("book")) });
+    out.push({ group: "View", label: "Show Pulse verdict and signals", keys: "signal verdict insights ai buy sell long short", run: () => (isMobile() ? setMobileView("signal") : setPanelTab("signal")) });
+    out.push({ group: "View", label: "Show market: sentiment, news, fundamentals", keys: "market news sentiment fear greed fundamentals", run: () => (isMobile() ? setMobileView("market") : setPanelTab("market")) });
+    if (!isMobile()) out.push({ group: "View", label: state.panelOpen ? "Hide panel" : "Show panel", keys: "panel sidebar", run: () => $("panelBtn").click() });
+    out.push({ group: "View", label: "About and data sources", keys: "about credits tradingview data sources license", run: () => toggleAbout(true) });
+    return out;
+  }
+
+  function renderPalette() {
+    const q = pInput.value.trim().toLowerCase();
+    const terms = q.split(/\s+/).filter(Boolean);
+    pItems = commands().filter((c) => {
+      const hay = `${c.label} ${c.keys} ${c.group}`.toLowerCase();
+      return terms.every((t) => hay.includes(t));
+    });
+    pActive = Math.min(pActive, Math.max(0, pItems.length - 1));
+    let html = "";
+    let group = "";
+    pItems.forEach((c, i) => {
+      if (c.group !== group) {
+        group = c.group;
+        html += `<li class="palette-group" role="presentation">${group}</li>`;
+      }
+      html +=
+        `<li class="palette-item" role="option" id="pi-${i}" data-i="${i}" aria-selected="${i === pActive}">` +
+        (c.icon ? `<img src="${c.icon}" alt="" width="16" height="16" />` : '<span class="palette-dot"></span>') +
+        `<span class="palette-label">${c.label}</span>` +
+        (c.active ? '<span class="palette-current">Current</span>' : "") +
+        `<span class="palette-hint num">${c.hint || ""}</span></li>`;
+    });
+    if (!pItems.length) html = `<li class="palette-empty">No match for "${escapeHtml(pInput.value)}". Try a pair like SOL, a timeframe like 5m, or an indicator name.</li>`;
+    pList.innerHTML = html;
+    pInput.setAttribute("aria-activedescendant", pItems.length ? `pi-${pActive}` : "");
+    const act = pList.querySelector(`[data-i="${pActive}"]`);
+    if (act) act.scrollIntoView({ block: "nearest" });
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
+  }
+
+  function openPalette(prefill) {
+    closeMenu();
+    pInput.value = prefill || "";
+    pActive = 0;
+    renderPalette();
+    if (!palette.open) palette.showModal();
+    pInput.focus();
+  }
+  function closePalette() {
+    if (palette.open) palette.close();
+  }
+  function runPalette(i) {
+    const c = pItems[i];
+    if (!c) return;
+    closePalette();
+    c.run();
+  }
+
+  pInput.addEventListener("input", () => {
+    pActive = 0;
+    renderPalette();
+  });
+  pInput.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      pActive = Math.min(pItems.length - 1, pActive + 1);
+      renderPalette();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      pActive = Math.max(0, pActive - 1);
+      renderPalette();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      runPalette(pActive);
     }
   });
-  document.addEventListener("mousemove", (e) => {
-    if (!isDragging) return;
-    const w = toolbar.offsetWidth;
-    const h = toolbar.offsetHeight;
-    const newLeft = Math.max(
-      0,
-      Math.min(e.clientX - offsetX, window.innerWidth - w),
-    );
-    const newTop = Math.max(
-      0,
-      Math.min(e.clientY - offsetY, window.innerHeight - h),
-    );
-    toolbar.style.left = newLeft + "px";
-    toolbar.style.top = newTop + "px";
+  pList.addEventListener("click", (e) => {
+    const li = e.target.closest("[data-i]");
+    if (li) runPalette(+li.dataset.i);
   });
-  document.addEventListener("mouseup", () => {
-    if (isDragging) {
-      isDragging = false;
-      toolbar.style.cursor = "grab";
+  pList.addEventListener("pointermove", (e) => {
+    const li = e.target.closest("[data-i]");
+    if (!li || +li.dataset.i === pActive) return;
+    pList.querySelector('[aria-selected="true"]')?.setAttribute("aria-selected", "false");
+    pActive = +li.dataset.i;
+    li.setAttribute("aria-selected", "true");
+  });
+  palette.addEventListener("click", (e) => {
+    if (e.target === palette) closePalette();
+  });
+  $("openPalette").addEventListener("click", () => openPalette());
+  $("symbolBox").addEventListener("click", () => openPalette("usdt"));
+
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  $("paletteKbd").textContent = isMac ? "\u2318K" : "Ctrl K";
+
+  document.addEventListener("keydown", (e) => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      if (palette.open) closePalette();
+      else openPalette();
+      return;
+    }
+    if (e.key === "/" && !typing && !palette.open) {
+      e.preventDefault();
+      openPalette();
+      return;
+    }
+    if (e.key === "Escape" && !menu.hidden) {
+      closeMenu();
+      $("indicatorsBtn").focus();
     }
   });
-}
 
-function updateClock() {
-  document.getElementById("clock").textContent =
-    new Date().toUTCString().slice(17, 25) + " UTC";
-}
+  // ---------------------------------------------------------------- chart tools
+  $("btnFit").addEventListener("click", () => chartView.fit());
+  $("btnReset").addEventListener("click", () => chartView.reset());
+  $("btnLive").addEventListener("click", () => chartView.scrollToRealtime());
 
-// -- live insights engine --
-// 20-bar rolling volume window, multi-signal consensus for price bias
-const insightsVolWindow = [];
-const INSIGHTS_VOL_WINDOW = 20;
-
-
-  // AI Trading Analysis
-function updateAITradingAnalysis(candle, vwap, closes) {
-  if (closes.length < 35 || vwap === null) return;
-  
-  const price = candle.close;
-  const rsiVal = parseFloat(candle.rsi);
-  const ema9v = parseFloat(candle.ema9);
-  const ema21v = parseFloat(candle.ema21);
-
-  // MACD calc
-  const calcEMA = (data, period) => {
-    const k = 2 / (period + 1);
-    let ema = data[0];
-    for (let i = 1; i < data.length; i++) {
-      ema = data[i] * k + ema * (1 - k);
+  // ---------------------------------------------------------------- boot
+  function init() {
+    buildBookRows();
+    resetBookView();
+    renderPairTabs();
+    renderSymbol();
+    renderTimeframes();
+    renderChartTypes();
+    renderPanel();
+    applyTheme(state.theme);
+    chartView.setSecondsVisible(state.tf === "1s");
+    chartView.setChartType(state.chartType, model);
+    recreateVpvr();
+    applyIndicators();
+    startFeed();
+    market.start(state.pair);
+    // canvas text is drawn before webfonts load; redraw the axes once they are ready
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => chartView.chart.applyOptions({ layout: { fontSize: 11 } }));
     }
-    return ema;
-  };
-  const macdLineArr = [];
-  for (let i = closes.length - 20; i <= closes.length; i++) {
-    const slice = closes.slice(0, i);
-    const ema12 = calcEMA(slice.slice(-50), 12);
-    const ema26 = calcEMA(slice.slice(-50), 26);
-    macdLineArr.push(ema12 - ema26);
-  }
-  const currentMacd = macdLineArr[macdLineArr.length - 1];
-  const signalLine = calcEMA(macdLineArr, 9);
-  const hist = currentMacd - signalLine;
-  const prevHist = macdLineArr[macdLineArr.length - 2] - calcEMA(macdLineArr.slice(0, -1), 9);
-
-  // BB calc
-  const bbSlice = closes.slice(-20);
-  const sma = bbSlice.reduce((a, b) => a + b, 0) / 20;
-  const squaredDiffs = bbSlice.map(val => Math.pow(val - sma, 2));
-  const stdDev = Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / 20);
-  const upper = sma + (stdDev * 2);
-  const lower = sma - (stdDev * 2);
-
-  // AI Logic
-  let score = 0;
-  let reasons = [];
-
-  if (price > vwap) { score += 20; reasons.push("Price > VWAP"); }
-  else { score -= 20; reasons.push("Price < VWAP"); }
-
-  if (!isNaN(rsiVal)) {
-    if (rsiVal < 40) { score += 20; reasons.push(`RSI Oversold`); }
-    else if (rsiVal > 60) { score -= 20; reasons.push(`RSI Overbought`); }
+    PulseFeed.fetchSymbolInfo(PAIRS)
+      .then((info) => {
+        Object.assign(symbolInfo, info);
+        applyPrecision();
+        updateQuote();
+        updateLegend();
+        if (lastTicker) renderTicker(lastTicker);
+        if (lastBook) renderBook(lastBook);
+      })
+      .catch((err) => console.warn("[exchangeInfo]", err));
   }
 
-  if (!isNaN(ema9v) && !isNaN(ema21v)) {
-    if (ema9v > ema21v) { score += 20; reasons.push("EMA Bull Cross"); }
-    else { score -= 20; reasons.push("EMA Bear Cross"); }
-  }
-
-  if (hist > 0 && hist > prevHist) { score += 20; reasons.push("MACD Momentum Rising"); }
-  else if (hist < 0 && hist < prevHist) { score -= 20; reasons.push("MACD Momentum Falling"); }
-
-  if (price < lower) { score += 20; reasons.push("Price rejected Lower BB"); }
-  else if (price > upper) { score -= 20; reasons.push("Price rejected Upper BB"); }
-
-  let confidence = Math.abs(score);
-  let bias = "NEUTRAL";
-  let risk = "High";
-  
-  if (confidence >= 80) risk = "Low";
-  else if (confidence >= 60) risk = "Medium";
-  else risk = "High";
-
-  let color = "var(--text-neutral)";
-  if (score > 0) { bias = "LONG"; color = "var(--text-bullish)"; }
-  else if (score < 0) { bias = "SHORT"; color = "var(--text-bearish)"; }
-
-  let verdict = "Wait for better setup.";
-  if (confidence < 40) {
-    bias = "NO TRADE";
-    color = "var(--text-neutral)";
-    verdict = "Conflicting signals. Waiting for clarity.";
-  } else {
-    verdict = `Aligned: ${reasons.slice(0,3).join(", ")}.`;
-  }
-
-  // Key Levels
-  let entry = price.toFixed(2);
-  let stop = "0.00";
-  let target = "0.00";
-
-  if (bias === "LONG") {
-    stop = lower.toFixed(2);
-    target = (price + (price - lower) * 2).toFixed(2); // 1:2 RR
-  } else if (bias === "SHORT") {
-    stop = upper.toFixed(2);
-    target = (price - (upper - price) * 2).toFixed(2);
-  }
-
-  const elBias = document.getElementById("aiBias");
-  const elRisk = document.getElementById("aiRisk");
-  const elReason = document.getElementById("aiReason");
-  const elEntry = document.getElementById("aiEntry");
-  const elStop = document.getElementById("aiStop");
-  const elTarget = document.getElementById("aiTarget");
-
-  if (elBias) {
-    elBias.innerHTML = `<span class="iconify" data-icon="tabler:target" style="margin-right: 4px; vertical-align: text-bottom;"></span>Bias: ${bias}`;
-    elBias.style.color = color;
-  }
-  if (elRisk) elRisk.innerHTML = `<span class="iconify" data-icon="tabler:alert-triangle" style="margin-right: 4px; vertical-align: text-bottom;"></span>Risk Level: ${risk} (Confidence: ${confidence}%)`;
-  if (elReason) elReason.innerHTML = `<span class="iconify" data-icon="tabler:bulb" style="margin-right: 4px; vertical-align: text-bottom;"></span>Reason: ${verdict}`;
-  if (elEntry) elEntry.textContent = entry;
-  if (elStop) elStop.textContent = stop;
-  if (elTarget) elTarget.textContent = target;
-}
-
-// volume context card: compares current bar volume to 20-bar rolling avg
-function updateInsightsWhale(candle) {
-  const text = document.getElementById("liWhaleText");
-  const meta = document.getElementById("liWhaleMeta");
-  const bar = document.getElementById("liVolBar");
-
-  insightsVolWindow.push(candle.volume);
-  if (insightsVolWindow.length > INSIGHTS_VOL_WINDOW)
-    insightsVolWindow.shift();
-
-  const avgVol =
-    insightsVolWindow.reduce((a, b) => a + b, 0) /
-    insightsVolWindow.length;
-  const ratio = avgVol > 0 ? candle.volume / avgVol : 0;
-  const barPct = Math.min(ratio * 40, 100).toFixed(0);
-
-  if (bar) {
-    bar.style.width = barPct + "%";
-    bar.classList.toggle("spike", ratio > 2.5);
-  }
-
-  const isUp = candle.close >= candle.open;
-  const isHigh = ratio > 2.5;
-  const isMed = ratio > 1.4 && ratio <= 2.5;
-  const isLow = ratio < 0.6;
-
-  let verdict, color;
-  if (isHigh && isUp) {
-    verdict = `Lots of buyers jumping in (${ratio.toFixed(1)}x normal). Great for a quick buy!`;
-    color = "var(--text-bullish)";
-  } else if (isHigh) {
-    verdict = `Lots of sellers dumping (${ratio.toFixed(1)}x normal). Expect a quick drop!`;
-    color = "var(--text-bearish)";
-  } else if (isMed && isUp) {
-    verdict = `More buyers than usual (${ratio.toFixed(1)}x normal). Up trend starting.`;
-    color = "var(--text-bullish)";
-  } else if (isMed) {
-    verdict = `More sellers than usual (${ratio.toFixed(1)}x normal). Down trend starting.`;
-    color = "var(--text-bearish)";
-  } else if (isLow) {
-    verdict = `Very slow right now (${ratio.toFixed(1)}x normal). Bad time for quick trades.`;
-    color = "var(--text-neutral)";
-  } else {
-    verdict = `Normal amount of trades (${ratio.toFixed(1)}x normal). Nothing crazy happening.`;
-    color = "var(--body)";
-  }
-
-  if (text) {
-    text.textContent = verdict;
-    text.style.color = color;
-  }
-  if (meta) meta.textContent = `${ratio.toFixed(1)}x 20-bar avg`;
-}
-
-// orderbook pressure card: visualizes bid/ask imbalance
-function updateInsightsOrderbook(bids, asks, maxTotal) {
-  const barsEl = document.getElementById("liObBars");
-  const text = document.getElementById("liObText");
-  const meta = document.getElementById("liObMeta");
-  if (!barsEl) return;
-
-  const bidVol = bids.reduce((a, b) => a + b[1], 0);
-  const askVol = asks.reduce((a, b) => a + b[1], 0);
-  const total = bidVol + askVol || 1;
-  const bidPct = bidVol / total;
-  const askPct = askVol / total;
-
-  // 4 ask bars + 4 bid bars side by side
-  const numBars = 4;
-  const bSlice = bids.slice(0, numBars);
-  const aSlice = asks.slice(0, numBars);
-  const peakVol = Math.max(
-    ...bSlice.map((b) => b[1]),
-    ...aSlice.map((a) => a[1]),
-    1,
-  );
-
-  let html = "";
-  aSlice.reverse().forEach((a) => {
-    const h = Math.max(4, Math.round((a[1] / peakVol) * 28));
-    html += `<div class="li-ob-bar-ask" style="height:${h}px"></div>`;
-  });
-  bSlice.forEach((b) => {
-    const h = Math.max(4, Math.round((b[1] / peakVol) * 28));
-    html += `<div class="li-ob-bar-bid" style="height:${h}px"></div>`;
-  });
-  barsEl.innerHTML = html;
-
-  const imbalance = Math.abs(bidPct - askPct);
-  const side = bidPct > askPct ? "bid" : "ask";
-  let label;
-  if (imbalance > 0.2) {
-    const price = side === "bid" ? bids[0][0] : asks[0][0];
-    label = `Huge wall of ${side === "bid" ? "buyers" : "sellers"} at ${price.toLocaleString()}. ${side === "ask" ? "Hard for price to go up." : "Strong floor, hard to drop."}`;
-  } else {
-    label = "Equal buyers and sellers. Market is flat right now.";
-  }
-
-  if (text) text.textContent = label;
-  if (meta)
-    meta.textContent = `High Imbalance | ${(bidPct * 100).toFixed(0)}% Bid vs ${(askPct * 100).toFixed(0)}% Ask`;
-}
-
-// MACD Momentum Card
-function updateInsightsMACD(closes) {
-  const text = document.getElementById("liMacdText");
-  const meta = document.getElementById("liMacdMeta");
-  if (!text) return;
-  if (closes.length < 35) {
-    text.textContent = "Gathering data...";
-    text.style.color = "var(--muted)";
-    return;
-  }
-
-  const calcEMA = (data, period) => {
-    const k = 2 / (period + 1);
-    let ema = data[0];
-    for (let i = 1; i < data.length; i++) {
-      ema = data[i] * k + ema * (1 - k);
-    }
-    return ema;
-  };
-
-  const macdLineArr = [];
-  for (let i = closes.length - 20; i <= closes.length; i++) {
-    const slice = closes.slice(0, i);
-    const ema12 = calcEMA(slice.slice(-50), 12);
-    const ema26 = calcEMA(slice.slice(-50), 26);
-    macdLineArr.push(ema12 - ema26);
-  }
-
-  const currentMacd = macdLineArr[macdLineArr.length - 1];
-  const signalLine = calcEMA(macdLineArr, 9);
-  const hist = currentMacd - signalLine;
-  const prevHist = macdLineArr[macdLineArr.length - 2] - calcEMA(macdLineArr.slice(0, -1), 9);
-
-  let verdict, color;
-  if (hist > 0 && hist > prevHist) {
-    verdict = "Strong uptrend! MACD is growing positive.";
-    color = "var(--text-bullish)";
-  } else if (hist > 0 && hist < prevHist) {
-    verdict = "Uptrend is slowing down. Be careful.";
-    color = "#f59e0b"; // yellow/amber
-  } else if (hist < 0 && hist < prevHist) {
-    verdict = "Strong downtrend! MACD is dropping fast.";
-    color = "var(--text-bearish)";
-  } else if (hist < 0 && hist > prevHist) {
-    verdict = "Downtrend is losing steam. Might bounce up.";
-    color = "#f59e0b";
-  }
-
-  if (text) {
-    text.textContent = verdict;
-    text.style.color = color;
-  }
-  if (meta) meta.textContent = `MACD: ${currentMacd.toFixed(2)} | Sig: ${signalLine.toFixed(2)}`;
-}
-
-// Bollinger Bands Volatility Card
-function updateInsightsBB(price, closes) {
-  const text = document.getElementById("liBbText");
-  const meta = document.getElementById("liBbMeta");
-  if (!text) return;
-  if (closes.length < 20) {
-    text.textContent = "Gathering data...";
-    text.style.color = "var(--muted)";
-    return;
-  }
-
-  const slice = closes.slice(-20);
-  const sma = slice.reduce((a, b) => a + b, 0) / 20;
-  
-  const squaredDiffs = slice.map(val => Math.pow(val - sma, 2));
-  const variance = squaredDiffs.reduce((a, b) => a + b, 0) / 20;
-  const stdDev = Math.sqrt(variance);
-
-  const upper = sma + (stdDev * 2);
-  const lower = sma - (stdDev * 2);
-
-  let verdict, color;
-  if (price > upper) {
-    verdict = "Price is above the upper band! Likely overbought, watch for a drop.";
-    color = "var(--text-bearish)";
-  } else if (price < lower) {
-    verdict = "Price dropped below the lower band! Oversold, good time to buy.";
-    color = "var(--text-bullish)";
-  } else if (price > sma) {
-    verdict = "Price is in the upper half. Looking steady.";
-    color = "var(--text-bullish)";
-  } else {
-    verdict = "Price is in the lower half. Slightly weak.";
-    color = "var(--text-bearish)";
-  }
-
-  const bandwidth = ((upper - lower) / sma) * 100;
-  if (bandwidth < 0.2) {
-    verdict = "Bollinger Squeeze! Market is very tight. Expect a big move soon.";
-    color = "#f59e0b";
-  }
-
-  if (text) {
-    text.textContent = verdict;
-    text.style.color = color;
-  }
-  if (meta) meta.textContent = `Upper: ${upper.toFixed(2)} | Lower: ${lower.toFixed(2)}`;
-}
-
-// -- boot --
-function init() {
-  createPairButtons();
-  initChart();
-  startStream();
-  setInterval(updateClock, 1000);
-  updateClock();
-  resetObInterval();
-}
-
-document.addEventListener("DOMContentLoaded", init);
+  init();
+})();
