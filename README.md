@@ -7,7 +7,7 @@
 ![Last commit](https://img.shields.io/github/last-commit/TechTronixx/Pulse-Terminal)
 ![License](https://img.shields.io/github/license/TechTronixx/Pulse-Terminal)
 
-A clean, focused, single-view terminal for watching the `1s` crypto market in real time, powered by Binance's WebSocket and REST APIs.
+A fast, single-view terminal for crypto, US stocks and commodities in real time, powered by Binance's public WebSocket and REST APIs.
 
 ## Screenshots
 
@@ -21,6 +21,8 @@ A clean, focused, single-view terminal for watching the `1s` crypto market in re
 
 ## Key Features
 
+- **Crypto, stocks and commodities** — 14 crypto pairs on Binance spot; SPY, QQQ, NVIDIA, Tesla, Apple, Microsoft, Amazon, Alphabet, Meta, AMD, Strategy and Coinbase; gold, silver, WTI and Brent crude, natural gas, copper and platinum. Stocks and commodities come from Binance USD-M perpetuals that track the real price and trade 24/7 (they can drift from the official price outside market hours).
+
 - **Trade-speed chart** — Candles move on every Binance trade (`@aggTrade`) and are reconciled against Binance's own klines, so OHLCV matches the exchange.
 - **Live order book** — Top 20 levels every 100 ms over the same WebSocket, with spread and bid/ask pressure.
 - **Market Cipher B** — Line-for-line port of the Pine Script v6 source: WaveTrend fast/slow/VWAP areas, MFI band, RSI and Stoch lines, cross dots, bottom/top signals, editable inputs, and its four alert conditions (in-app and browser notifications, on bar close).
@@ -32,7 +34,7 @@ A clean, focused, single-view terminal for watching the `1s` crypto market in re
 - **Built-in help** — ? explanations for every indicator, a Market Cipher B guide in its settings, and tooltips across the UI.
 - **Fast timeframes** — 1s, 1m, 3m, 5m, 15m, and 30m, with 1,000 bars of history.
 - **Keyboard first** — `Ctrl K` / `⌘K` or `/` opens a command palette for pairs, timeframes, indicators, and views.
-- **Smooth navigation** — Kinetic scrolling with mouse and touch, resizable indicator panes, light and dark themes, and a phone layout.
+- **Smooth navigation** — Trackpad scroll and pinch move the chart directly, mouse-wheel notches ease in, the price axis rescales smoothly instead of jumping, and drag keeps kinetic momentum. Indicator panes resize by dragging their divider; the right panel resizes by dragging its left edge or with the wide-panel button, which puts the verdict and timeframes side by side.
 
 ## Tech Stack
 
@@ -49,12 +51,15 @@ A clean, focused, single-view terminal for watching the `1s` crypto market in re
 | File | Role |
 | --- | --- |
 | `js/indicators.js` | Pure indicator math with Pine Script semantics (na handling, SMA-seeded EMA, `ta.stoch`, crossovers, Market Cipher B). |
-| `js/feed.js` | Binance feed: history, combined WebSocket, trade-built candles, reconnect with backoff. |
+| `js/instruments.js` | Market catalog (crypto / stocks / commodities, venue, icons, news symbols). |
+| `js/feed.js` | Binance spot and USD-M perpetual feed: history, WebSockets, trade-built candles, reconnect with backoff. |
 | `js/chart.js` | Lightweight Charts setup, panes, and series mapping. |
 | `js/vpvr.js`, `js/vpvr-view.js` | Volume profile math and overlay. |
 | `js/verdict.js` | Pulse verdict rules (per-timeframe Market Cipher B read, component scores, levels). |
 | `js/market.js` | Multi-timeframe klines, Fear & Greed, CoinGecko, and news polling. |
-| `api/news.js`, `api/_news-core.js` | News function and its RSS parser / headline scoring. |
+| `api/news.js`, `api/_news-core.js` | News function (crypto RSS, Yahoo Finance for stocks and commodities) and headline scoring. |
+| `api/sentiment.js` | CNN US stock market Fear & Greed, proxied for the browser. |
+| `scripts/make-icons.js` | Generates the monogram icons in `icons/markets/`. |
 | `scripts/dev.js` | Local server for the site and `/api/news`. |
 | `js/app.js` | State, UI, order book, Signal and Market tabs, palette, tooltips, alerts. |
 | `tests/` | Unit tests for indicator math, verdict rules, and news scoring. |
@@ -62,7 +67,7 @@ A clean, focused, single-view terminal for watching the `1s` crypto market in re
 ## Tests
 
 ```bash
-node --test tests/indicators.test.js tests/verdict.test.js
+node --test tests/indicators.test.js tests/verdict.test.js tests/instruments.test.js
 ```
 
 ## Quick Start

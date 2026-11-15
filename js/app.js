@@ -4,7 +4,9 @@
   "use strict";
 
   const I = window.PulseIndicators;
-  const PAIRS = ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP", "ADA", "LINK"];
+  const IN = window.PulseInstruments;
+  const PAIRS = IN.LIST.map((i) => i.id);
+  const inst = () => IN.get(state.pair);
   const TIMEFRAMES = ["1s", "1m", "3m", "5m", "15m", "30m"];
   const CHART_TYPES = { candlestick: "Candles", heikinAshi: "Heikin Ashi", line: "Line" };
   const INDICATORS = [
@@ -28,11 +30,13 @@
   // ---------------------------------------------------------------- state
   const defaults = {
     pair: "BTC",
+    group: "crypto",
     tf: "1m",
     chartType: "candlestick",
     theme: document.documentElement.getAttribute("data-theme") || "dark",
     panel: "book",
     panelOpen: true,
+    panelW: null,
     ind: { vol: true, vwap: false, ema: false, rsi: false, vpvr: false, mcb: true },
     mcb: Object.assign({}, I.MCB_DEFAULTS),
     alerts: { inApp: true, notify: false },
@@ -50,6 +54,8 @@
     s.alerts = Object.assign({}, defaults.alerts, saved.alerts);
     s.vpvr = Object.assign({}, window.VPVRView ? VPVRView.DEFAULTS : {}, saved.vpvr, { enabled: !!s.ind.vpvr });
     if (!PAIRS.includes(s.pair)) s.pair = defaults.pair;
+    if (!IN.GROUPS.some((g) => g.id === s.group)) s.group = IN.get(s.pair).group;
+    if (!PulseFeed.supports(IN.get(s.pair).venue, s.tf)) s.tf = "1m";
     if (s.panel === "insights") s.panel = "signal";
     if (!["book", "signal", "market"].includes(s.panel)) s.panel = "book";
     if (!TIMEFRAMES.includes(s.tf)) s.tf = defaults.tf;
@@ -104,7 +110,9 @@
     return nf(4).format(v);
   }
   const fmtPct = (v) => (isNa(v) ? "\u2013" : (v >= 0 ? "+" : "") + nf(2).format(v) + "%");
-  const coinIcon = (pair) => `icons/coins/${pair.toLowerCase()}.svg`;
+  const coinIcon = (id) => (IN.get(id) ? IN.get(id).icon : "icons/favicon.svg");
+  const venueName = (it) => (it.venue === "spot" ? "Binance spot" : "Binance perp");
+  const labelOf = (id) => (IN.get(id) ? IN.get(id).label : id);
 
   // ---------------------------------------------------------------- chart + model
   const chartView = PulseChart.create($("chart"), { theme: state.theme });
@@ -173,8 +181,8 @@
     try {
       const minuteEdge = Math.floor(first / 60) * 60;
       const parts = await Promise.all([
-        minuteEdge > dayStart ? PulseFeed.fetchKlines(pair, "1m", dayStart * 1000, minuteEdge * 1000) : [],
-        first > minuteEdge ? PulseFeed.fetchKlines(pair, "1s", minuteEdge * 1000, first * 1000) : [],
+        minuteEdge > dayStart ? PulseFeed.fetchKlines(IN.get(pair), "1m", dayStart * 1000, minuteEdge * 1000) : [],
+        first > minuteEdge && IN.get(pair).venue === "spot" ? PulseFeed.fetchKlines(IN.get(pair), "1s", minuteEdge * 1000, first * 1000) : [],
       ]);
       if (myGen !== seedGen || pair !== state.pair) return;
       vwapSeed = addToSeed(null, parts[0].concat(parts[1]), day);
@@ -275,9 +283,6 @@
     onTicker(tk) {
       renderTicker(tk);
     },
-    onMini(minis) {
-      for (const base in minis) renderPairTab(base, minis[base]);
-    },
     onStatus(s) {
       renderStatus(s);
     },
@@ -305,7 +310,7 @@
     $("streamText").textContent = `Loading 1,000 ${state.tf} bars from Binance`;
     $("streamOverlay").classList.remove("is-hidden");
     resetBookView();
-    feed.start(state.pair, state.tf, PAIRS);
+    feed.start(inst(), state.tf);
   }
 
   // ---------------------------------------------------------------- pair / timeframe / type
@@ -315,18 +320,27 @@
   }
 
   function switchPair(pair) {
-    if (pair === state.pair) return;
+    if (pair === state.pair || !IN.get(pair)) return;
     state.pair = pair;
+    state.group = IN.get(pair).group;
+    // futures have no 1s candles
+    if (!PulseFeed.supports(inst().venue, state.tf)) {
+      state.tf = "1m";
+      chartView.setSecondsVisible(false);
+    }
     save();
+    renderGroups();
+    renderPairTabs();
+    renderTimeframes();
     renderSymbol();
     applyPrecision();
     startFeed();
     resetMarketData();
-    market.start(pair);
+    market.start(inst());
   }
 
   function switchTimeframe(tf) {
-    if (tf === state.tf) return;
+    if (tf === state.tf || !PulseFeed.supports(inst().venue, tf)) return;
     state.tf = tf;
     save();
     renderTimeframes();
@@ -351,22 +365,56 @@
   }
 
   // ---------------------------------------------------------------- top bar
+  function renderGroups() {
+    const seg = $("groupSeg");
+    if (!seg.children.length) {
+      for (const g of IN.GROUPS) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.setAttribute("role", "tab");
+        b.dataset.group = g.id;
+        b.textContent = g.name;
+        b.dataset.tip =
+          g.id === "crypto"
+            ? "Crypto on Binance spot"
+            : `${g.name} as Binance perpetual contracts: they track the real price and trade 24/7`;
+        b.addEventListener("click", () => showGroup(g.id));
+        seg.appendChild(b);
+      }
+    }
+    for (const b of seg.children) b.setAttribute("aria-selected", String(b.dataset.group === state.group));
+  }
+
+  // switching the group shows its markets; the chart changes when a market is picked
+  function showGroup(g) {
+    if (g === state.group) return;
+    state.group = g;
+    save();
+    renderGroups();
+    renderPairTabs();
+    pollTickers(true);
+  }
+
   function renderPairTabs() {
     const nav = $("pairTabs");
     nav.innerHTML = "";
-    for (const p of PAIRS) {
+    for (const it of IN.inGroup(state.group)) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "pair-tab";
-      b.dataset.pair = p;
-      b.setAttribute("aria-pressed", String(p === state.pair));
+      b.dataset.pair = it.id;
+      b.dataset.tip = `${it.name} \u00b7 ${venueName(it)}`;
+      b.setAttribute("aria-pressed", String(it.id === state.pair));
       b.innerHTML =
-        `<img src="${coinIcon(p)}" alt="" width="14" height="14" />` +
-        `<span class="pair-sym">${p}</span>` +
+        `<img src="${it.icon}" alt="" width="14" height="14" />` +
+        `<span class="pair-sym">${it.id}</span>` +
         `<span class="pair-chg num" data-chg>\u2013</span>`;
-      b.addEventListener("click", () => switchPair(p));
+      b.addEventListener("click", () => switchPair(it.id));
       nav.appendChild(b);
+      if (miniCache[it.id]) renderPairTab(it.id, miniCache[it.id]);
     }
+    const active = nav.querySelector('[aria-pressed="true"]');
+    if (active) active.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
   const miniCache = {};
@@ -378,17 +426,48 @@
     el.dataset.dir = mini.changePct >= 0 ? "up" : "down";
   }
 
+  // 24h change for the visible group's tabs (REST, every 5 s while the tab is visible)
+  let tickerTimer = 0;
+  let tickerBusy = false;
+  function pollTickers(now) {
+    clearTimeout(tickerTimer);
+    const run = () => {
+      if (document.hidden || tickerBusy) return schedule();
+      tickerBusy = true;
+      PulseFeed.fetchTickers(IN.inGroup(state.group))
+        .then((t) => {
+          for (const id in t) renderPairTab(id, t[id]);
+        })
+        .catch((e) => console.warn("[tickers]", e))
+        .finally(() => {
+          tickerBusy = false;
+          schedule();
+        });
+    };
+    const schedule = () => (tickerTimer = setTimeout(run, 5000));
+    if (now) run();
+    else schedule();
+  }
+
   function renderSymbol() {
+    const it = inst();
     document.querySelectorAll(".pair-tab").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.pair === state.pair)));
-    $("symbolText").textContent = `${state.pair}-USDT`;
-    $("symbolIcon").src = coinIcon(state.pair);
-    $("lgSymbol").textContent = `${state.pair}-USDT`;
-    $("bookBase").textContent = `(${state.pair})`;
+    $("symbolText").textContent = it.label;
+    $("symbolIcon").src = it.icon;
+    $("symbolVenue").textContent = it.venue === "spot" ? "Binance spot" : `${it.kind} \u00b7 perp`;
+    $("symbolName").textContent = it.name;
+    $("symbolBox").dataset.tip =
+      it.venue === "spot"
+        ? `${it.name} on Binance spot. Click to change market.`
+        : `${it.name}: a Binance USD-M perpetual that tracks the real price and trades 24/7. Outside regular market hours it can drift from the official price. Click to change market.`;
+    $("lgSymbol").textContent = it.label;
+    $("bookBase").textContent = `(${it.id})`;
+    $("statusSrc").textContent = it.venue === "spot" ? "Binance spot, public data" : "Binance USD-M perpetual, public data";
     renderLegendMeta();
   }
 
   function renderLegendMeta() {
-    $("lgMeta").textContent = `${state.tf} \u00b7 ${CHART_TYPES[state.chartType]} \u00b7 Binance`;
+    $("lgMeta").textContent = `${state.tf} \u00b7 ${CHART_TYPES[state.chartType]} \u00b7 ${venueName(inst())}`;
   }
 
   function renderTimeframes() {
@@ -404,7 +483,14 @@
         seg.appendChild(b);
       }
     }
-    for (const b of seg.children) b.setAttribute("aria-checked", String(b.dataset.tf === state.tf));
+    const venue = inst().venue;
+    for (const b of seg.children) {
+      const ok = PulseFeed.supports(venue, b.dataset.tf);
+      b.disabled = !ok;
+      if (!ok) b.dataset.tip = "1s candles are only available for crypto spot";
+      else delete b.dataset.tip;
+      b.setAttribute("aria-checked", String(b.dataset.tf === state.tf));
+    }
     renderLegendMeta();
   }
 
@@ -446,7 +532,7 @@
     const now = Date.now();
     if (now - titleAt > 1000) {
       titleAt = now;
-      document.title = `${fmtPrice(price)} ${state.pair}-USDT \u00b7 Pulse Terminal`;
+      document.title = `${fmtPrice(price)} ${labelOf(state.pair)} \u00b7 Pulse Terminal`;
     }
     if (lastTicker && lastTicker.open) {
       const pct = ((price - lastTicker.open) / lastTicker.open) * 100;
@@ -847,6 +933,7 @@
     for (const k in mtfReads) delete mtfReads[k];
     fundamentalsData = null;
     newsData = null;
+    fng = null;
     renderVerdict(true);
     renderMarket();
   }
@@ -1036,7 +1123,36 @@
   function renderMarket() {
     if (isMobile() ? mobileView !== "market" : !(state.panelOpen && state.panel === "market")) return;
 
+    const it = inst();
+    const group = it.group;
+    $("fgTitle").textContent = group === "stocks" ? "Sentiment \u00b7 US stocks" : group === "crypto" ? "Sentiment \u00b7 crypto" : "Sentiment";
+    $("fgTitle").dataset.tip =
+      group === "stocks"
+        ? "CNN Fear & Greed Index for the US stock market, from 7 indicators including momentum, breadth, put/call ratio and volatility."
+        : group === "crypto"
+          ? "Crypto Fear & Greed Index (alternative.me), updated daily. Built from volatility, momentum, social media, dominance and trends."
+          : "There is no standard fear and greed index for commodities. The verdict uses news tone instead.";
+    $("fgBody").hidden = group === "commodities";
+    $("fgNone").hidden = group !== "commodities";
+    $("fdBody").hidden = !it.cg;
+    $("fdNone").hidden = !!it.cg;
+    $("fdNone").textContent =
+      group === "stocks"
+        ? `Fundamentals come from CoinGecko and cover crypto only. For ${it.name}, see earnings and filings on the company's investor site.`
+        : `Fundamentals come from CoinGecko and cover crypto only. ${it.name} has no supply or market cap data here.`;
+    $("newsTitle").dataset.tip =
+      group === "crypto"
+        ? "Headlines from CoinDesk, Cointelegraph, Decrypt and Bitcoin.com. Tags come from keyword scoring, not from reading the full article."
+        : `Yahoo Finance headlines that name ${it.name}. Tags come from keyword scoring, not from reading the full article.`;
+
     // ---- sentiment ----
+    if (!fng) {
+      $("fgValue").textContent = "\u2013";
+      $("fgLabel").textContent = "Loading";
+      $("fgLabel").dataset.tone = "flat";
+      $("fgHistory").innerHTML = "";
+      $("fgUpdated").textContent = "\u2013";
+    }
     if (fng) {
       $("fgValue").textContent = fng.value;
       $("fgLabel").textContent = fng.label;
@@ -1059,6 +1175,7 @@
     if (newsData) {
       list.innerHTML = "";
       if (newsData.error || !newsData.items.length) {
+        if (!newsData.error) $("newsTally").textContent = "0 headlines";
         const li = document.createElement("li");
         li.className = "news-empty";
         li.textContent = newsData.error
@@ -1184,7 +1301,7 @@
       const id = `${state.pair}|${state.tf}|${bar.time}|${a.key}`;
       if (alerted.has(id)) continue;
       alerted.add(id);
-      const body = `${state.pair}-USDT ${state.tf} \u00b7 close ${fmtPrice(bar.close)}`;
+      const body = `${labelOf(state.pair)} ${state.tf} \u00b7 close ${fmtPrice(bar.close)}`;
       if (state.alerts.inApp) toast(a.title, body, a.tone);
       if (state.alerts.notify && "Notification" in window && Notification.permission === "granted") {
         try {
@@ -1270,6 +1387,75 @@
       save();
     }
   });
+
+  // ---- panel width: drag the left edge, double-click to reset, or toggle wide ----
+  const PANEL_MIN = 280;
+  const defaultPanelW = () => (window.innerWidth >= 1440 ? 400 : 336);
+  const maxPanelW = () => Math.max(PANEL_MIN, Math.min(960, window.innerWidth - 480));
+  const clampW = (w) => Math.round(Math.max(PANEL_MIN, Math.min(maxPanelW(), w)));
+  let widthRaf = 0;
+  function applyPanelWidth(w) {
+    const px = clampW(w || defaultPanelW());
+    $("app").style.setProperty("--panel-w", `${px}px`);
+    $("panelWiden").setAttribute("aria-pressed", String(px >= 600));
+    $("panelResizer").setAttribute("aria-valuenow", String(px));
+    return px;
+  }
+  function setPanelWidth(w, persist) {
+    state.panelW = w ? clampW(w) : null;
+    applyPanelWidth(state.panelW);
+    if (persist) save();
+    queuePaneLayout();
+  }
+  (function panelResize() {
+    const handle = $("panelResizer");
+    let startX = 0;
+    let startW = 0;
+    let pending = null;
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      startX = e.clientX;
+      startW = $("panel").getBoundingClientRect().width;
+      $("app").dataset.resizing = "true";
+    });
+    handle.addEventListener("pointermove", (e) => {
+      if (!handle.hasPointerCapture(e.pointerId)) return;
+      pending = startW + (startX - e.clientX);
+      if (widthRaf) return;
+      widthRaf = requestAnimationFrame(() => {
+        widthRaf = 0;
+        if (pending !== null) setPanelWidth(pending, false);
+      });
+    });
+    const end = (e) => {
+      if (!handle.hasPointerCapture(e.pointerId)) return;
+      handle.releasePointerCapture(e.pointerId);
+      delete $("app").dataset.resizing;
+      save();
+    };
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+    handle.addEventListener("dblclick", () => setPanelWidth(null, true));
+    handle.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      const cur = $("panel").getBoundingClientRect().width;
+      setPanelWidth(cur + (e.key === "ArrowLeft" ? 24 : -24), true);
+    });
+    let narrowW = null;
+    $("panelWiden").addEventListener("click", () => {
+      const cur = $("panel").getBoundingClientRect().width;
+      if (cur >= 600) setPanelWidth(narrowW, true);
+      else {
+        narrowW = state.panelW;
+        setPanelWidth(Math.max(640, Math.min(760, Math.round(window.innerWidth * 0.42))), true);
+      }
+    });
+    window.addEventListener("resize", () => applyPanelWidth(state.panelW));
+    applyPanelWidth(state.panelW);
+  })();
 
   // tab keyboard: left/right arrows move between tabs
   $("panel").querySelector(".panel-tabs").addEventListener("keydown", (e) => {
@@ -1494,19 +1680,21 @@
 
   function commands() {
     const out = [];
-    for (const p of PAIRS) {
-      const mini = miniCache[p];
-      out.push({
-        group: "Pairs",
-        label: `${p}-USDT`,
-        hint: mini ? `${fmtPrice(mini.last, p)}  ${fmtPct(mini.changePct)}` : "",
-        icon: coinIcon(p),
-        keys: `${p} ${p}usdt pair`,
-        active: p === state.pair,
-        run: () => switchPair(p),
-      });
+    for (const g of IN.GROUPS) {
+      for (const it of IN.inGroup(g.id)) {
+        const mini = miniCache[it.id];
+        out.push({
+          group: g.name,
+          label: `${it.label}  ${it.name}`,
+          hint: mini ? `${fmtPrice(mini.last, it.id)}  ${fmtPct(mini.changePct)}` : "",
+          icon: it.icon,
+          keys: `${it.id} ${it.symbol} ${it.name} ${it.kind} ${g.id} pair market`,
+          active: it.id === state.pair,
+          run: () => switchPair(it.id),
+        });
+      }
     }
-    for (const tf of TIMEFRAMES) out.push({ group: "Timeframe", label: `Timeframe ${tf}`, keys: `tf interval ${tf}`, active: tf === state.tf, run: () => switchTimeframe(tf) });
+    for (const tf of TIMEFRAMES.filter((t) => PulseFeed.supports(inst().venue, t))) out.push({ group: "Timeframe", label: `Timeframe ${tf}`, keys: `tf interval ${tf}`, active: tf === state.tf, run: () => switchTimeframe(tf) });
     for (const t in CHART_TYPES) out.push({ group: "Chart type", label: CHART_TYPES[t], keys: `chart type ${t}`, active: t === state.chartType, run: () => switchChartType(t) });
     for (const ind of INDICATORS) {
       out.push({
@@ -1624,7 +1812,7 @@
     if (e.target === palette) closePalette();
   });
   $("openPalette").addEventListener("click", () => openPalette());
-  $("symbolBox").addEventListener("click", () => openPalette("usdt"));
+  $("symbolBox").addEventListener("click", () => openPalette(state.group === "crypto" ? "crypto" : state.group));
 
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
   $("paletteKbd").textContent = isMac ? "\u2318K" : "Ctrl K";
@@ -1657,7 +1845,10 @@
   function init() {
     buildBookRows();
     resetBookView();
+    renderGroups();
     renderPairTabs();
+    pollTickers(true);
+    document.addEventListener("visibilitychange", () => !document.hidden && pollTickers(true));
     renderSymbol();
     renderTimeframes();
     renderChartTypes();
@@ -1668,12 +1859,12 @@
     recreateVpvr();
     applyIndicators();
     startFeed();
-    market.start(state.pair);
+    market.start(inst());
     // canvas text is drawn before webfonts load; redraw the axes once they are ready
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => chartView.chart.applyOptions({ layout: { fontSize: 11 } }));
     }
-    PulseFeed.fetchSymbolInfo(PAIRS)
+    PulseFeed.fetchSymbolInfo(IN.LIST)
       .then((info) => {
         Object.assign(symbolInfo, info);
         applyPrecision();

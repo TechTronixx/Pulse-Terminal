@@ -11,7 +11,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'none'; script-src 'self' https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' wss://stream.binance.com:9443 wss://data-stream.binance.vision https://api.binance.com https://data-api.binance.vision https://api.alternative.me https://api.coingecko.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none';"
+          "value": "default-src 'none'; script-src 'self' https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' wss://stream.binance.com:9443 wss://data-stream.binance.vision wss://fstream.binance.com https://api.binance.com https://data-api.binance.vision https://fapi.binance.com https://api.alternative.me https://api.coingecko.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none';"
         },
         {
           "key": "X-Frame-Options",

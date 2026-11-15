@@ -43,7 +43,7 @@
       crosshair: "rgba(255, 255, 255, 0.28)",
       label: "#2a2a2a",
       separator: "#1c1c1c",
-      separatorHover: "rgba(255, 255, 255, 0.08)",
+      separatorHover: "rgba(226, 120, 63, 0.35)",
       up: "#e2783f",
       down: "#d4d4d4",
       volUp: "rgba(226, 120, 63, 0.42)",
@@ -64,7 +64,7 @@
       crosshair: "rgba(0, 0, 0, 0.3)",
       label: "#1a1a1a",
       separator: "#e7e6e2",
-      separatorHover: "rgba(0, 0, 0, 0.06)",
+      separatorHover: "rgba(196, 86, 29, 0.3)",
       up: "#c4561d",
       down: "#2c2c2c",
       volUp: "rgba(196, 86, 29, 0.35)",
@@ -179,24 +179,33 @@
 
     // ---- smooth wheel / trackpad zoom and scroll ----
     // Wheel or pinch zooms around the cursor; horizontal swipe or Shift+wheel scrolls.
-    // The visible range eases toward a target each frame instead of jumping.
+    // Trackpads already send smooth, small deltas, so they move the chart directly (no lag).
+    // A mouse wheel moves in notches, so each notch eases toward its target with a
+    // frame-rate independent exponential curve (same feel at 60 Hz and 144 Hz).
+    const reduceMotion = global.matchMedia && global.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let dataLen = 0;
     (function smoothWheel() {
       const ts = chart.timeScale();
-      const reduce = global.matchMedia && global.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const TAU = 70; // ms; ~95% of the way in 210 ms
       let target = null;
       let raf = 0;
+      let last = 0;
 
-      function step() {
+      function step(now) {
         raf = 0;
         const cur = ts.getVisibleLogicalRange();
         if (!cur || !target) return;
-        const k = 0.3;
-        const from = cur.from + (target.from - cur.from) * k;
-        const to = cur.to + (target.to - cur.to) * k;
-        const done = Math.abs(target.from - from) < 0.01 && Math.abs(target.to - to) < 0.01;
+        const dt = Math.min(50, now - (last || now - 16));
+        last = now;
+        const a = 1 - Math.exp(-dt / TAU);
+        const from = cur.from + (target.from - cur.from) * a;
+        const to = cur.to + (target.to - cur.to) * a;
+        const done = Math.abs(target.from - from) < 0.02 && Math.abs(target.to - to) < 0.02;
         ts.setVisibleLogicalRange(done ? target : { from, to });
-        if (done) target = null;
-        else raf = global.requestAnimationFrame(step);
+        if (done) {
+          target = null;
+          last = 0;
+        } else raf = global.requestAnimationFrame(step);
       }
 
       function stop() {
@@ -246,7 +255,7 @@
             to = anchor + (to - anchor) * f;
           }
           // keep some data in view
-          const n = main && main.data ? main.data().length : 0;
+          const n = dataLen;
           const w = to - from;
           if (n) {
             const maxTo = n - 1 + w * 0.6;
@@ -260,18 +269,76 @@
               from = minFrom;
             }
           }
-          target = { from, to };
-          if (reduce) {
-            ts.setVisibleLogicalRange(target);
-            target = null;
+          // mouse wheel notches ease; trackpad deltas apply directly
+          const notch = e.deltaMode !== 0 || (Math.abs(dx) < 1 && Math.abs(dy) >= 50 && Number.isInteger(dy) && !e.ctrlKey);
+          if (reduceMotion || !notch) {
+            stop();
+            ts.setVisibleLogicalRange({ from, to });
             return;
           }
+          target = { from, to };
           if (!raf) raf = global.requestAnimationFrame(step);
         },
         { passive: false },
       );
       container.addEventListener("pointerdown", stop);
     })();
+
+    // ---- smooth price autoscale ----
+    // Lightweight Charts re-fits the price axis on every frame, so scrolling makes the
+    // candles jump up and down. The main series' autoscale eases toward the true range
+    // instead; overlays (VWAP / EMA) report their range here and are folded in.
+    const yAuto = { overlays: new Map(), cur: null, at: 0, snap: true, request: null, raf: 0 };
+    function requestY() {
+      if (yAuto.raf || !yAuto.request) return;
+      yAuto.raf = global.requestAnimationFrame(() => {
+        yAuto.raf = 0;
+        if (yAuto.request) yAuto.request();
+      });
+    }
+    function mainAutoscale(orig) {
+      const r = orig();
+      if (!r || !r.priceRange) return r;
+      let lo = r.priceRange.minValue;
+      let hi = r.priceRange.maxValue;
+      for (const v of yAuto.overlays.values()) {
+        if (!v) continue;
+        if (v.lo < lo) lo = v.lo;
+        if (v.hi > hi) hi = v.hi;
+      }
+      const now = global.performance ? global.performance.now() : Date.now();
+      const span = hi - lo || Math.abs(hi) * 0.001 || 1;
+      const c = yAuto.cur;
+      if (!c || yAuto.snap || reduceMotion || lo > c.hi + span || hi < c.lo - span) {
+        yAuto.cur = { lo, hi };
+        yAuto.snap = false;
+      } else {
+        const dt = Math.min(64, now - yAuto.at);
+        const a = 1 - Math.exp(-dt / 90);
+        c.lo += (lo - c.lo) * a;
+        c.hi += (hi - c.hi) * a;
+        if (Math.abs(c.lo - lo) > span * 0.001 || Math.abs(c.hi - hi) > span * 0.001) requestY();
+        else yAuto.cur = { lo, hi };
+      }
+      yAuto.at = now;
+      return { priceRange: { minValue: yAuto.cur.lo, maxValue: yAuto.cur.hi }, margins: r.margins };
+    }
+    function overlayAutoscale(key) {
+      return (orig) => {
+        const r = orig();
+        yAuto.overlays.set(key, r && r.priceRange ? { lo: r.priceRange.minValue, hi: r.priceRange.maxValue } : null);
+        return null;
+      };
+    }
+    // a no-op primitive that gives us requestUpdate() for the main series
+    function redrawHook() {
+      return {
+        attached: ({ requestUpdate }) => (yAuto.request = requestUpdate),
+        detached: () => (yAuto.request = null),
+        updateAllViews() {},
+        paneViews: () => [],
+      };
+    }
 
     let main = null;
     let volume = null;
@@ -327,6 +394,7 @@
           priceFormat: priceFormat(),
           crosshairMarkerRadius: 3,
           lastPriceAnimation: LWC.LastPriceAnimationMode.OnDataUpdate,
+          autoscaleInfoProvider: mainAutoscale,
         }, 0);
       } else {
         main = chart.addSeries(LWC.CandlestickSeries, {
@@ -336,8 +404,11 @@
           wickUpColor: t.up,
           wickDownColor: t.down,
           priceFormat: priceFormat(),
+          autoscaleInfoProvider: mainAutoscale,
         }, 0);
       }
+      main.attachPrimitive(redrawHook());
+      yAuto.snap = true;
       try {
         main.setSeriesOrder(0);
       } catch (_) {}
@@ -353,9 +424,14 @@
         }, 0);
         chart.priceScale("vol", 0).applyOptions({ visible: false, scaleMargins: { top: 0.82, bottom: 0 } });
       }
-      if (!vwap) vwap = chart.addSeries(LWC.LineSeries, lineOpts(t.vwap, { lineWidth: 2, priceFormat: priceFormat() }), 0);
-      if (!ema9) ema9 = chart.addSeries(LWC.LineSeries, lineOpts(t.ema9, { lineWidth: 1, priceFormat: priceFormat() }), 0);
-      if (!ema21) ema21 = chart.addSeries(LWC.LineSeries, lineOpts(t.ema21, { lineWidth: 1, priceFormat: priceFormat() }), 0);
+      if (!vwap) vwap = chart.addSeries(LWC.LineSeries, lineOpts(t.vwap, { lineWidth: 2, priceFormat: priceFormat(), autoscaleInfoProvider: overlayAutoscale("vwap") }), 0);
+      if (!ema9) ema9 = chart.addSeries(LWC.LineSeries, lineOpts(t.ema9, { lineWidth: 1, priceFormat: priceFormat(), autoscaleInfoProvider: overlayAutoscale("ema9") }), 0);
+      if (!ema21) ema21 = chart.addSeries(LWC.LineSeries, lineOpts(t.ema21, { lineWidth: 1, priceFormat: priceFormat(), autoscaleInfoProvider: overlayAutoscale("ema21") }), 0);
+      if (!ind.vwap) yAuto.overlays.delete("vwap");
+      if (!ind.ema) {
+        yAuto.overlays.delete("ema9");
+        yAuto.overlays.delete("ema21");
+      }
       volume.applyOptions({ visible: !!ind.vol });
       vwap.applyOptions({ visible: !!ind.vwap });
       ema9.applyOptions({ visible: !!ind.ema });
@@ -519,6 +595,8 @@
 
     function setData(model) {
       const n = model.bars.length;
+      dataLen = n;
+      yAuto.snap = true;
       const idx = Array.from({ length: n }, (_, i) => i);
       main.setData(idx.map((i) => mainPoint(model, i)));
       volume.setData(idx.map((i) => volPoint(model, i)));
@@ -540,6 +618,7 @@
 
     function update(model, from) {
       const n = model.bars.length;
+      dataLen = n;
       for (let i = Math.max(0, from); i < n; i++) {
         const hist = i < n - 1;
         main.update(mainPoint(model, i), hist);
@@ -635,9 +714,11 @@
       },
       relayout: setStretch,
       fit() {
+        yAuto.snap = true;
         chart.timeScale().fitContent();
       },
       reset() {
+        yAuto.snap = true;
         chart.timeScale().resetTimeScale();
         chart.timeScale().applyOptions({ barSpacing: 7, rightOffset: 8 });
         chart.panes().forEach((p) => p.priceScale("right").setAutoScale(true));

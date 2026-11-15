@@ -1,6 +1,6 @@
 // js/market.js -- slower market data for the Signal and Market panels:
-//   multi-timeframe klines (Binance), Fear & Greed (alternative.me),
-//   fundamentals (CoinGecko), and news (/api/news, see api/news.js).
+//   multi-timeframe klines (Binance spot or perp), Fear & Greed (alternative.me for crypto,
+//   CNN via api/sentiment.js for stocks), fundamentals (CoinGecko, crypto only), and news (/api/news).
 // Exposes global `PulseMarket`.
 (function (global) {
   "use strict";
@@ -29,57 +29,34 @@
     }
     return out;
   }
-  const COINGECKO_IDS = {
-    BTC: "bitcoin",
-    ETH: "ethereum",
-    SOL: "solana",
-    BNB: "binancecoin",
-    DOGE: "dogecoin",
-    XRP: "ripple",
-    ADA: "cardano",
-    LINK: "chainlink",
-  };
-  const REST_HOSTS = ["https://api.binance.com", "https://data-api.binance.vision"];
-
   async function getJson(url, signal) {
     const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }
 
-  async function klines(pair, tf, signal) {
-    let err = null;
-    for (const host of REST_HOSTS) {
-      try {
-        const interval = tf === "1y" ? "1M" : tf;
-        const limit = LONG_TF[tf] ? 1000 : 300;
-        const rows = await getJson(`${host}/api/v3/klines?symbol=${pair}USDT&interval=${interval}&limit=${limit}`, signal);
-        const bars = rows.map((k) => ({
-          time: Math.floor(k[0] / 1000),
-          open: +k[1],
-          high: +k[2],
-          low: +k[3],
-          close: +k[4],
-          volume: +k[5],
-        }));
-        return tf === "1y" ? toYears(bars) : bars;
-      } catch (e) {
-        if (e.name === "AbortError") throw e;
-        err = e;
-      }
-    }
-    throw err;
+  async function klines(inst, tf, signal) {
+    const interval = tf === "1y" ? "1M" : tf;
+    const limit = LONG_TF[tf] ? 1000 : 300;
+    const bars = await global.PulseFeed.fetchRecentKlines(inst, interval, limit, signal);
+    return tf === "1y" ? toYears(bars) : bars;
   }
-
   async function fearGreed(signal) {
     const d = await getJson("https://api.alternative.me/fng/?limit=8", signal);
     const rows = (d.data || []).map((r) => ({ value: +r.value, label: r.value_classification, time: +r.timestamp }));
     if (!rows.length) throw new Error("No Fear & Greed data");
-    return { value: rows[0].value, label: rows[0].label, time: rows[0].time, history: rows };
+    return { value: rows[0].value, label: rows[0].label, time: rows[0].time, history: rows, source: "crypto" };
   }
 
-  async function coingecko(pair, signal) {
-    const id = COINGECKO_IDS[pair];
+  // US stock market Fear & Greed (CNN), proxied by api/sentiment.js.
+  async function stockFearGreed(signal) {
+    const d = await getJson("api/sentiment", signal);
+    if (!Number.isFinite(d.value)) throw new Error("No stock sentiment data");
+    return d;
+  }
+
+  async function coingecko(inst, signal) {
+    const id = inst.cg;
     const d = await getJson(
       `https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&community_data=false&developer_data=false&sparkline=false`,
       signal,
@@ -108,8 +85,8 @@
     };
   }
 
-  async function news(pair, signal) {
-    return getJson(`api/news?coin=${encodeURIComponent(pair)}`, signal);
+  async function news(inst, signal) {
+    return getJson(`api/news?coin=${encodeURIComponent(inst.id)}`, signal);
   }
 
   function create(h) {
@@ -143,8 +120,10 @@
         for (const tf of MTF) {
           every(MTF_REFRESH[tf], () => run((s) => klines(pair, tf, s), (bars) => h.onKlines(tf, bars), (e) => h.onError("klines " + tf, e)));
         }
-        every(15 * 60e3, () => run(fearGreed, h.onFearGreed, (e) => h.onError("fng", e), 60e3));
-        every(5 * 60e3, () => run((s) => coingecko(pair, s), h.onFundamentals, (e) => h.onError("coingecko", e), 45e3));
+        // sentiment: crypto Fear & Greed for crypto, CNN Fear & Greed for stocks, none for commodities
+        if (pair.group === "crypto") every(15 * 60e3, () => run(fearGreed, h.onFearGreed, (e) => h.onError("fng", e), 60e3));
+        else if (pair.group === "stocks") every(15 * 60e3, () => run(stockFearGreed, h.onFearGreed, (e) => h.onError("fng", e), 60e3));
+        if (pair.cg) every(5 * 60e3, () => run((s) => coingecko(pair, s), h.onFundamentals, (e) => h.onError("coingecko", e), 45e3));
         every(5 * 60e3, () => run((s) => news(pair, s), h.onNews, (e) => h.onError("news", e), 60e3));
       },
       stop() {
@@ -157,5 +136,5 @@
     };
   }
 
-  global.PulseMarket = { create, MTF, COINGECKO_IDS };
+  global.PulseMarket = { create, MTF };
 })(typeof window !== "undefined" ? window : globalThis);

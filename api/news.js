@@ -1,9 +1,9 @@
 // api/news.js -- Vercel serverless function: GET /api/news?coin=BTC
-// Reads public RSS feeds (CoinDesk, Cointelegraph, Decrypt, Bitcoin.com), scores headlines
+// Crypto: public RSS feeds (CoinDesk, Cointelegraph, Decrypt, Bitcoin.com). Stocks and commodities:`n// Yahoo Finance per-symbol RSS. Scores headlines
 // with a keyword lexicon, and returns JSON. Cached at the edge for 5 minutes.
 "use strict";
 
-const { FEEDS, COINS, parseRss, buildNews } = require("./_news-core.js");
+const { FEEDS, COINS, YAHOO, yahooFeed, parseRss, buildNews } = require("./_news-core.js");
 
 const FEED_TIMEOUT_MS = 6000;
 
@@ -24,15 +24,17 @@ async function fetchFeed(feed) {
 }
 
 async function getNews(coin) {
-  const results = await Promise.allSettled(FEEDS.map(fetchFeed));
+  const yahoo = YAHOO[coin];
+  const feeds = yahoo ? [yahooFeed(yahoo)] : FEEDS;
+  const results = await Promise.allSettled(feeds.map(fetchFeed));
   const items = [];
   const failed = [];
   results.forEach((r, i) => {
     if (r.status === "fulfilled") items.push(...r.value);
-    else failed.push(FEEDS[i].source);
+    else failed.push(feeds[i].source);
   });
-  const out = buildNews(items, coin, Date.now());
-  out.sources = FEEDS.map((f) => f.source).filter((s) => !failed.includes(s));
+  const out = buildNews(items, coin, Date.now(), 20, !!yahoo);
+  out.sources = feeds.map((f) => f.source).filter((s) => !failed.includes(s));
   out.failed = failed;
   return out;
 }
@@ -40,10 +42,10 @@ async function getNews(coin) {
 module.exports = async function handler(req, res) {
   const url = new URL(req.url, "http://localhost");
   const coin = String(url.searchParams.get("coin") || "BTC").toUpperCase();
-  if (!COINS[coin]) {
+  if (!COINS[coin] && !YAHOO[coin]) {
     res.statusCode = 400;
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ error: `Unsupported coin "${coin}". Use one of ${Object.keys(COINS).join(", ")}.` }));
+    res.end(JSON.stringify({ error: `Unsupported coin "${coin}". Use one of ${Object.keys(COINS).concat(Object.keys(YAHOO)).join(", ")}.` }));
     return;
   }
   try {

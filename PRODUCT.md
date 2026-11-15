@@ -29,7 +29,7 @@ A free, no-login, no-build terminal that opens instantly in a browser and reads 
 - Vanilla HTML, CSS, and JavaScript; no build step, no package dependencies at runtime except Lightweight Charts from unpkg.
 - One serverless function, `api/news.js` (Vercel), reads public RSS headlines; everything else runs in the browser. CryptoPanic was considered but has no free API plan (owner decision: free RSS for now, swappable later).
 - Data: Binance public REST and WebSocket only. Fallback to `data-api.binance.vision` / `data-stream.binance.vision` where `binance.com` is blocked.
-- Pairs: BTC, ETH, SOL, BNB, DOGE, XRP, ADA, LINK against USDT (user decision: keep these 8 for now).
+- Markets (owner decision: only relevant ones): 14 crypto pairs on Binance spot; 12 US stocks / index ETFs and 7 commodities as Binance USD-M TradFi perpetuals (24/7, track the underlying, may drift outside market hours). No 1s candles for perps.
 - Timeframes: 1s, 1m, 3m, 5m, 15m, 30m.
 - Market Cipher B must reproduce the user's Pine Script v6 source exactly (same inputs, defaults, plots, colors, signals, alert conditions).
 - Insights stays (user decision) and the old trade read is rebuilt as the Pulse verdict: rule-based Long / Short / Wait from Market Cipher B on 1m-1y plus sentiment (Fear & Greed), news tone, and CoinGecko fundamentals (owner decision: rule-based, not an LLM). Never presented as financial advice.

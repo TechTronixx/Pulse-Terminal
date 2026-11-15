@@ -59,6 +59,7 @@
         <symbol id="i-info" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0-18 0m9-3h.01"/><path d="M11 12h1v4h1"/></g></symbol>
         <symbol id="i-news" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 6h3a1 1 0 0 1 1 1v11a2 2 0 0 1-4 0V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v12a3 3 0 0 0 3 3h11M8 8h4m-4 4h4m-4 4h4"/></symbol>
         <symbol id="i-help" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0-18 0m9 4v.01"/><path d="M12 13a2 2 0 0 0 .914-3.782a1.98 1.98 0 0 0-2.414.483"/></g></symbol>
+        <symbol id="i-widen" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m7 8l-4 4l4 4m10-8l4 4l-4 4M3 12h18"/></symbol>
       </defs>
     </svg>
 
@@ -68,11 +69,12 @@
           <span class="brand-mark"><svg class="ic"><use href="#i-pulse" /></svg></span>
           <span class="brand-name">Pulse</span>
         </a>
-        <nav class="pair-tabs" id="pairTabs" aria-label="Trading pairs"></nav>
+        <div class="group-seg" id="groupSeg" role="tablist" aria-label="Market groups"></div>
+        <nav class="pair-tabs" id="pairTabs" aria-label="Markets"></nav>
         <div class="topbar-end">
-          <button class="search-trigger" id="openPalette" type="button" aria-label="Search pairs, indicators and commands">
+          <button class="search-trigger" id="openPalette" type="button" aria-label="Search markets, indicators and commands">
             <svg class="ic"><use href="#i-search" /></svg>
-            <span class="search-label">Search pairs, indicators, commands</span>
+            <span class="search-label">Search markets, indicators, commands</span>
             <kbd id="paletteKbd">Ctrl K</kbd>
           </button>
           <button class="icon-btn" id="themeBtn" type="button" aria-label="Switch to light theme">
@@ -83,7 +85,7 @@
 
       <section class="symbolbar" aria-label="Market">
         <button class="symbol-box" id="symbolBox" type="button" aria-label="Change pair">
-          <span class="symbol-venue">Binance spot</span>
+          <span class="symbol-venue"><span id="symbolVenue">Binance spot</span> <span class="symbol-fullname" id="symbolName">Bitcoin</span></span>
           <span class="symbol-name">
             <img id="symbolIcon" src="icons/coins/btc.svg" alt="" width="16" height="16" />
             <span id="symbolText">BTC-USDT</span>
@@ -180,10 +182,12 @@
         </div>
 
         <aside class="panel" id="panel" aria-label="Market panels">
+          <div class="panel-resizer" id="panelResizer" role="separator" aria-orientation="vertical" aria-label="Resize panel" tabindex="0" data-tip="Drag to resize the panel. Double-click to reset. Arrow keys work too."></div>
           <div class="panel-tabs" role="tablist" aria-label="Panels">
             <button type="button" role="tab" id="tab-book" aria-controls="view-book" aria-selected="true" data-tab="book">Order book</button>
             <button type="button" role="tab" id="tab-signal" aria-controls="view-signal" aria-selected="false" data-tab="signal">Signal</button>
             <button type="button" role="tab" id="tab-market" aria-controls="view-market" aria-selected="false" data-tab="market">Market</button>
+            <button type="button" class="panel-widen icon-btn" id="panelWiden" aria-pressed="false" aria-label="Wide panel" data-tip="Wide panel: verdict and timeframes side by side, no scrolling"><svg class="ic"><use href="#i-widen" /></svg></button>
             <button type="button" class="panel-close icon-btn" id="panelClose" aria-label="Close panel"><svg class="ic"><use href="#i-x" /></svg></button>
           </div>
 
@@ -332,9 +336,11 @@
           <section class="panel-view" id="view-market" role="tabpanel" aria-labelledby="tab-market" hidden>
             <div class="panel-section">
               <div class="summary-head">
-                <h2 class="section-title" data-tip="Crypto Fear &amp; Greed Index (alternative.me), updated daily. Built from volatility, momentum, social media, dominance and trends.">Sentiment</h2>
+                <h2 class="section-title" id="fgTitle" data-tip="Fear and greed index for this market.">Sentiment</h2>
                 <span class="summary-risk" id="fgUpdated">&ndash;</span>
               </div>
+              <p class="news-empty" id="fgNone" hidden>No standard fear and greed index exists for commodities, so the verdict reads sentiment from news tone instead.</p>
+              <div id="fgBody">
               <div class="fg">
                 <span class="fg-value num" id="fgValue">&ndash;</span>
                 <span class="fg-label" id="fgLabel">Loading</span>
@@ -342,11 +348,12 @@
               <div class="fg-scale" aria-hidden="true"><span class="score-mark" id="fgMark"></span></div>
               <div class="score-legend"><span>Extreme fear</span><span>Extreme greed</span></div>
               <div class="fg-history num" id="fgHistory" data-tip="Last 7 days, oldest on the left."></div>
+              </div>
             </div>
 
             <div class="panel-section">
               <div class="summary-head">
-                <h2 class="section-title" data-tip="Headlines from CoinDesk, Cointelegraph, Decrypt and Bitcoin.com. Tags come from keyword scoring, not from reading the full article.">News</h2>
+                <h2 class="section-title" id="newsTitle" data-tip="Headlines for this market. Tags come from keyword scoring, not from reading the full article.">News</h2>
                 <span class="summary-risk num" id="newsTally">&ndash;</span>
               </div>
               <ul class="news-list" id="newsList"><li class="news-empty">Loading headlines</li></ul>
@@ -357,7 +364,8 @@
                 <h2 class="section-title" data-tip="Market data from CoinGecko, refreshed every 5 minutes.">Fundamentals</h2>
                 <span class="summary-risk" id="fdRank">&ndash;</span>
               </div>
-              <dl class="stat-grid" id="fdGrid">
+              <p class="news-empty" id="fdNone" hidden></p>
+              <dl class="stat-grid" id="fdBody">
                 <div data-tip="Price times circulating supply."><dt>Market cap</dt><dd class="num" id="fdMcap">&ndash;</dd></div>
                 <div data-tip="Price times maximum supply. A big gap to market cap means more coins can still enter circulation."><dt>Fully diluted</dt><dd class="num" id="fdFdv">&ndash;</dd></div>
                 <div data-tip="24h trading volume as a share of market cap. Higher = more active trading."><dt>Volume / cap</dt><dd class="num" id="fdTurnover">&ndash;</dd></div>
@@ -374,7 +382,7 @@
         <span class="conn" id="connState" data-state="connecting" data-tip="WebSocket connection to Binance."><i class="conn-dot"></i><span id="connText">Connecting</span></span>
         <span class="status-item num" id="latency" data-tip="Time from a trade on Binance to this browser, smoothed.">Feed &ndash; ms</span>
         <span class="status-item num" id="tps" data-tip="Trades received in the last second.">&ndash; trades/s</span>
-        <span class="status-item status-src">Binance spot, public data</span>
+        <span class="status-item status-src" id="statusSrc">Binance spot, public data</span>
         <span class="status-spacer"></span>
         <span class="status-item num" id="utcClock" data-tip="Binance server time (UTC).">&ndash; UTC</span>
         <button type="button" class="icon-btn status-about" id="aboutBtn" aria-haspopup="dialog" aria-expanded="false" aria-label="About and data sources"><svg class="ic"><use href="#i-info" /></svg></button>
@@ -392,7 +400,7 @@
     <!-- About popover -->
     <div class="about" id="aboutPop" role="dialog" aria-label="About Pulse Terminal" hidden>
       <h2>Pulse Terminal</h2>
-      <p>Live market data from Binance's public API. Sentiment from alternative.me, fundamentals from CoinGecko, headlines from CoinDesk, Cointelegraph, Decrypt and Bitcoin.com.</p>
+      <p>Live market data from Binance's public API: crypto from Binance spot, stocks and commodities from Binance USD-M perpetuals that track the real price. Sentiment from alternative.me (crypto) and CNN (US stocks), fundamentals from CoinGecko, headlines from CoinDesk, Cointelegraph, Decrypt, Bitcoin.com and Yahoo Finance.</p>
       <p>Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts.</p>
       <p class="fineprint">Frontend terminal. It never places trades or asks for keys. Signals are rule-based readings, not financial advice.</p>
     </div>
@@ -483,7 +491,7 @@
     <dialog class="palette" id="palette" aria-label="Command palette">
       <div class="palette-input">
         <svg class="ic"><use href="#i-search" /></svg>
-        <input type="text" id="paletteInput" placeholder="Search pairs, timeframes, indicators" autocomplete="off" spellcheck="false" aria-controls="paletteList" aria-autocomplete="list" role="combobox" aria-expanded="true" />
+        <input type="text" id="paletteInput" placeholder="Search crypto, stocks, gold, oil, timeframes, indicators" autocomplete="off" spellcheck="false" aria-controls="paletteList" aria-autocomplete="list" role="combobox" aria-expanded="true" />
         <kbd>Esc</kbd>
       </div>
       <ul class="palette-list" id="paletteList" role="listbox" aria-label="Results"></ul>
@@ -492,6 +500,7 @@
     <div class="toasts" id="toasts" aria-live="polite"></div>
 
     <script src="js/indicators.js"></script>
+    <script src="js/instruments.js"></script>
     <script src="js/feed.js"></script>
     <script src="js/chart.js"></script>
     <script src="js/verdict.js"></script>

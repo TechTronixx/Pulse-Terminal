@@ -6,6 +6,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const newsHandler = require("../api/news.js");
+const sentimentHandler = require("../api/sentiment.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const PORT = Number(process.argv[2]) || 4173;
@@ -24,6 +25,7 @@ http
   .createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname === "/api/news") return newsHandler(req, res);
+    if (url.pathname === "/api/sentiment") return sentimentHandler(req, res);
     let rel = decodeURIComponent(url.pathname);
     if (rel === "/") rel = "/Terminal-main.html";
     const file = path.resolve(ROOT, "." + rel);

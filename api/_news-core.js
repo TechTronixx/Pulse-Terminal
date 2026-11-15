@@ -20,7 +20,41 @@ const COINS = {
   XRP: { names: /\bripple\b/i, ticker: /\bXRP\b/ },
   ADA: { names: /\bcardano\b/i, ticker: /\bADA\b/ },
   LINK: { names: /\bchainlink\b/i, ticker: /\bLINK\b/ },
+  HYPE: { names: /\bhyperliquid\b/i, ticker: /\bHYPE\b/ },
+  SUI: { names: /\bsui (network|blockchain|price|token)\b/i, ticker: /\bSUI\b/ },
+  AVAX: { names: /\bavalanche\b/i, ticker: /\bAVAX\b/ },
+  LTC: { names: /\blitecoin\b/i, ticker: /\bLTC\b/ },
+  TRX: { names: /\btron\b/i, ticker: /\bTRX\b/ },
+  PEPE: { names: /\bpepe\b/i, ticker: /\bPEPE\b/ },
 };
+
+// Stocks and commodities: per-symbol Yahoo Finance RSS (every item is about the symbol).
+const { LIST } = require("../js/instruments.js");
+const YAHOO = Object.fromEntries(LIST.filter((i) => i.group !== "crypto" && i.news).map((i) => [i.id, i.news]));
+// Yahoo per-symbol feeds include loosely related stories; keep the ones that name the market.
+const NAME_WORDS = {
+  SPY: /\b(s&p|s&amp;p|sp ?500|stocks?|wall street|equities)\b/i,
+  QQQ: /\b(nasdaq|tech stocks|big tech)\b/i,
+  GOOGL: /\b(alphabet|google)\b/i,
+  META: /\b(meta|facebook|instagram|zuckerberg)\b/i,
+  MSTR: /\b(strategy|microstrategy|saylor)\b/i,
+  XAU: /\bgold\b/i,
+  XAG: /\bsilver\b/i,
+  CL: /\b(oil|crude|wti|opec)\b/i,
+  BZ: /\b(oil|crude|brent|opec)\b/i,
+  NATGAS: /\b(natural gas|lng|gas prices)\b/i,
+  COPPER: /\bcopper\b/i,
+  XPT: /\bplatinum\b/i,
+};
+for (const it of LIST) {
+  if (it.group !== "stocks" || NAME_WORDS[it.id]) continue;
+  const word = it.name.split(" ")[0].replace(/[^A-Za-z]/g, "");
+  NAME_WORDS[it.id] = new RegExp(`\\b${word}\\b`, "i");
+}
+const yahooFeed = (sym) => ({
+  source: "Yahoo Finance",
+  url: `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(sym)}&region=US&lang=en-US`,
+});
 
 const BULLISH = [
   "surge", "surges", "surged", "soar", "soars", "soared", "rally", "rallies", "rallied", "jump", "jumps", "jumped",
@@ -113,11 +147,13 @@ const tagOf = (score) => (score > 0.15 ? "bullish" : score < -0.15 ? "bearish" :
 
 function mentions(coin, text) {
   const c = COINS[coin];
-  return !!c && (c.names.test(text) || c.ticker.test(text));
+  if (c) return c.names.test(text) || c.ticker.test(text);
+  const w = NAME_WORDS[coin];
+  return !!w && (w.test(text) || new RegExp(`\\b${coin}\\b`).test(text));
 }
 
 // Merge feeds, dedupe, score, and pick coin-specific items (topped up with general market news).
-function buildNews(feedItems, coin, now, limit = 20) {
+function buildNews(feedItems, coin, now, limit = 20, specificOnly = false) {
   const seen = new Set();
   const all = [];
   for (const it of feedItems) {
@@ -140,7 +176,7 @@ function buildNews(feedItems, coin, now, limit = 20) {
   const specific = all.filter((x) => x.coinSpecific);
   const general = all.filter((x) => !x.coinSpecific);
   const items = specific.slice(0, limit);
-  for (const g of general) {
+  for (const g of specificOnly ? [] : general) {
     if (items.length >= Math.max(8, Math.min(limit, specific.length + 6))) break;
     items.push(g);
   }
@@ -166,4 +202,4 @@ function buildNews(feedItems, coin, now, limit = 20) {
   };
 }
 
-module.exports = { FEEDS, COINS, parseRss, scoreHeadline, tagOf, mentions, buildNews, decodeEntities };
+module.exports = { FEEDS, COINS, YAHOO, yahooFeed, parseRss, scoreHeadline, tagOf, mentions, buildNews, decodeEntities };
