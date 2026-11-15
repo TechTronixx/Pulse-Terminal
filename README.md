@@ -31,6 +31,7 @@ A fast, single-view terminal for crypto, US stocks and commodities in real time,
 - **Market Cipher B by timeframe** — Zone, last dot, and read for every timeframe, with the reasons in a tooltip.
 - **Market tab** — Crypto Fear & Greed Index, coin headlines from CoinDesk, Cointelegraph, Decrypt, and Bitcoin.com tagged bullish / bearish, and fundamentals (market cap, FDV, supply, distance from ATH, 7d / 30d trend).
 - **Insights** — Chart-timeframe indicator summary, order-book pressure, activity, MACD momentum, and Bollinger volatility.
+- **Watchlist** — Star any market (or press `W`) and follow crypto, stocks and commodities side by side: live price, 24h change and the 1h Market Cipher B read (Long / Short / Wait). Click a row to open it.
 - **Built-in help** — ? explanations for every indicator, a Market Cipher B guide in its settings, and tooltips across the UI.
 - **Fast timeframes** — 1s, 1m, 3m, 5m, 15m, and 30m, with 1,000 bars of history.
 - **Keyboard first** — `Ctrl K` / `⌘K` or `/` opens a command palette for pairs, timeframes, indicators, and views.

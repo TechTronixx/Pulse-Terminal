@@ -60,6 +60,9 @@
         <symbol id="i-news" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 6h3a1 1 0 0 1 1 1v11a2 2 0 0 1-4 0V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v12a3 3 0 0 0 3 3h11M8 8h4m-4 4h4m-4 4h4"/></symbol>
         <symbol id="i-help" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0-18 0m9 4v.01"/><path d="M12 13a2 2 0 0 0 .914-3.782a1.98 1.98 0 0 0-2.414.483"/></g></symbol>
         <symbol id="i-widen" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m7 8l-4 4l4 4m10-8l4 4l-4 4M3 12h18"/></symbol>
+        <symbol id="i-star" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m12 17.75l-6.172 3.245l1.179-6.873l-5-4.867l6.9-1l3.086-6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873z"/></symbol>
+        <symbol id="i-star-on" viewBox="0 0 24 24"><path fill="currentColor" d="m8.243 7.34l-6.38.925l-.113.023a1 1 0 0 0-.44 1.684l4.622 4.499l-1.09 6.355l-.013.11a1 1 0 0 0 1.464.944l5.706-3l5.693 3l.1.046a1 1 0 0 0 1.352-1.1l-1.091-6.355l4.624-4.5l.078-.085a1 1 0 0 0-.633-1.62l-6.38-.926l-2.852-5.78a1 1 0 0 0-1.794 0z"/></symbol>
+        <symbol id="i-list" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 6h11M9 12h11M9 18h11M5 6v.01M5 12v.01M5 18v.01"/></symbol>
       </defs>
     </svg>
 
@@ -92,6 +95,8 @@
             <svg class="ic ic-sm"><use href="#i-chevron" /></svg>
           </span>
         </button>
+
+        <button class="icon-btn star-btn" id="starBtn" type="button" aria-pressed="false" aria-label="Add to watchlist" data-tip="Add to watchlist (W)"><svg class="ic"><use href="#i-star" id="starIcon" /></svg></button>
 
         <div class="seg" id="tfSeg" role="radiogroup" aria-label="Timeframe"></div>
 
@@ -187,6 +192,7 @@
             <button type="button" role="tab" id="tab-book" aria-controls="view-book" aria-selected="true" data-tab="book">Order book</button>
             <button type="button" role="tab" id="tab-signal" aria-controls="view-signal" aria-selected="false" data-tab="signal">Signal</button>
             <button type="button" role="tab" id="tab-market" aria-controls="view-market" aria-selected="false" data-tab="market">Market</button>
+            <button type="button" role="tab" id="tab-watch" aria-controls="view-watch" aria-selected="false" data-tab="watch">Watchlist</button>
             <button type="button" class="panel-widen icon-btn" id="panelWiden" aria-pressed="false" aria-label="Wide panel" data-tip="Wide panel: verdict and timeframes side by side, no scrolling"><svg class="ic"><use href="#i-widen" /></svg></button>
             <button type="button" class="panel-close icon-btn" id="panelClose" aria-label="Close panel"><svg class="ic"><use href="#i-x" /></svg></button>
           </div>
@@ -375,6 +381,25 @@
               </dl>
             </div>
           </section>
+
+          <section class="panel-view" id="view-watch" role="tabpanel" aria-labelledby="tab-watch" hidden>
+            <div class="panel-section watch">
+              <div class="summary-head">
+                <h2 class="section-title" data-tip="Your markets across crypto, stocks and commodities. Prices refresh every 5 seconds; the 1h read is Market Cipher B on the 1-hour chart, refreshed every minute.">Watchlist</h2>
+                <span class="summary-risk num" id="watchTally">&ndash;</span>
+              </div>
+              <div class="watch-head" aria-hidden="true">
+                <span>Market</span>
+                <span>Price</span>
+                <span data-tip="Change versus 24 hours ago.">24h</span>
+                <span data-tip="Market Cipher B read on the 1-hour chart: Long, Short or Wait.">1h read</span>
+                <span></span>
+              </div>
+              <ol class="watch-list" id="watchList"></ol>
+              <p class="watch-empty" id="watchEmpty" hidden>Your watchlist is empty. Star a market with the star next to its name, or press W.</p>
+              <button type="button" class="text-btn" id="watchAdd">Add markets&hellip;</button>
+            </div>
+          </section>
         </aside>
       </main>
 
@@ -393,6 +418,7 @@
         <button type="button" data-view="book" aria-pressed="false"><svg class="ic"><use href="#i-book" /></svg><span>Book</span></button>
         <button type="button" data-view="signal" aria-pressed="false"><svg class="ic"><use href="#i-pulse" /></svg><span>Signal</span></button>
         <button type="button" data-view="market" aria-pressed="false"><svg class="ic"><use href="#i-news" /></svg><span>Market</span></button>
+        <button type="button" data-view="watch" aria-pressed="false"><svg class="ic"><use href="#i-star" /></svg><span>Watch</span></button>
         <button type="button" data-view="indicators" aria-pressed="false"><svg class="ic"><use href="#i-indicators" /></svg><span>Indicators</span></button>
       </nav>
     </div>

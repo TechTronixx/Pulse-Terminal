@@ -37,6 +37,7 @@
     panel: "book",
     panelOpen: true,
     panelW: null,
+    watch: ["BTC", "ETH", "SOL", "NVDA", "SPY", "XAU", "CL"],
     ind: { vol: true, vwap: false, ema: false, rsi: false, vpvr: false, mcb: true },
     mcb: Object.assign({}, I.MCB_DEFAULTS),
     alerts: { inApp: true, notify: false },
@@ -57,7 +58,8 @@
     if (!IN.GROUPS.some((g) => g.id === s.group)) s.group = IN.get(s.pair).group;
     if (!PulseFeed.supports(IN.get(s.pair).venue, s.tf)) s.tf = "1m";
     if (s.panel === "insights") s.panel = "signal";
-    if (!["book", "signal", "market"].includes(s.panel)) s.panel = "book";
+    if (!["book", "signal", "market", "watch"].includes(s.panel)) s.panel = "book";
+    s.watch = (Array.isArray(saved.watch) ? saved.watch : defaults.watch).filter((id, i, a) => PAIRS.includes(id) && a.indexOf(id) === i);
     if (!TIMEFRAMES.includes(s.tf)) s.tf = defaults.tf;
     if (!CHART_TYPES[s.chartType]) s.chartType = defaults.chartType;
     return s;
@@ -333,6 +335,8 @@
     renderPairTabs();
     renderTimeframes();
     renderSymbol();
+    renderStar();
+    renderWatch();
     applyPrecision();
     startFeed();
     resetMarketData();
@@ -1354,7 +1358,7 @@
   tickClock();
 
   // ---------------------------------------------------------------- panel
-  const PANEL_TABS = ["book", "signal", "market"];
+  const PANEL_TABS = ["book", "signal", "market", "watch"];
   function renderPanel() {
     $("app").dataset.panel = state.panelOpen ? "open" : "closed";
     $("panelBtn").setAttribute("aria-pressed", String(state.panelOpen));
@@ -1364,7 +1368,154 @@
     }
     if (state.panel === "signal") updateInsights(true);
     if (state.panel === "market") renderMarket();
+    syncWatchPolling();
   }
+
+  // ---------------------------------------------------------------- watchlist
+  const watchReads = {};
+  let watchPriceTimer = 0;
+  let watchReadTimer = 0;
+  let watchBusy = false;
+
+  function watchVisible() {
+    if (isMobile()) return mobileView === "watch";
+    return state.panelOpen && state.panel === "watch";
+  }
+  const inWatch = (id) => state.watch.includes(id);
+
+  function toggleWatch(id, on) {
+    const has = inWatch(id);
+    const want = on === undefined ? !has : on;
+    if (want && !has) state.watch.push(id);
+    if (!want && has) state.watch = state.watch.filter((x) => x !== id);
+    save();
+    renderStar();
+    renderWatch();
+    if (want && !has && watchVisible()) {
+      refreshWatchPrices();
+      refreshWatchReads([id]);
+    }
+  }
+
+  function renderStar() {
+    const on = inWatch(state.pair);
+    $("starBtn").setAttribute("aria-pressed", String(on));
+    $("starBtn").setAttribute("aria-label", on ? "Remove from watchlist" : "Add to watchlist");
+    $("starBtn").dataset.tip = on ? "Remove from watchlist (W)" : "Add to watchlist (W)";
+    $("starIcon").setAttribute("href", on ? "#i-star-on" : "#i-star");
+  }
+
+  function renderWatch() {
+    const list = $("watchList");
+    const ids = state.watch;
+    $("watchEmpty").hidden = ids.length > 0;
+    let up = 0;
+    let down = 0;
+    for (const id of ids) {
+      const m = miniCache[id];
+      if (m) m.changePct >= 0 ? up++ : down++;
+    }
+    $("watchTally").textContent = ids.length ? `${ids.length} markets \u00b7 ${up} up \u00b7 ${down} down` : "\u2013";
+    // rebuild rows only when the list itself changes
+    const key = ids.join(",") + "|" + state.pair;
+    if (list.dataset.key !== key) {
+      list.dataset.key = key;
+      list.innerHTML = "";
+      for (const id of ids) {
+        const it = IN.get(id);
+        const li = document.createElement("li");
+        li.className = "watch-row";
+        li.dataset.id = id;
+        li.dataset.active = String(id === state.pair);
+        li.innerHTML =
+          `<button type="button" class="watch-open" aria-label="Open ${it.name}">` +
+          `<img src="${it.icon}" alt="" width="18" height="18" />` +
+          `<span class="watch-name"><b>${it.id}</b><em>${it.name}</em></span></button>` +
+          '<span class="watch-price num"></span>' +
+          '<span class="watch-chg num"></span>' +
+          '<span class="tag tag-strong watch-read"></span>' +
+          `<button type="button" class="icon-btn watch-remove" aria-label="Remove ${it.name} from watchlist" data-tip="Remove"><svg class="ic"><use href="#i-x" /></svg></button>`;
+        list.appendChild(li);
+      }
+    }
+    for (const li of list.children) {
+      const id = li.dataset.id;
+      const m = miniCache[id];
+      const r = watchReads[id];
+      const price = li.querySelector(".watch-price");
+      const chg = li.querySelector(".watch-chg");
+      const read = li.querySelector(".watch-read");
+      const pTxt = m ? fmtPrice(m.last, id) : "\u2013";
+      if (price.textContent !== pTxt) {
+        const prev = +price.dataset.v;
+        price.textContent = pTxt;
+        if (m && prev && m.last !== prev) {
+          price.dataset.dir = m.last > prev ? "up" : "down";
+          price.classList.remove("tick");
+          void price.offsetWidth;
+          price.classList.add("tick");
+        }
+        if (m) price.dataset.v = m.last;
+      }
+      chg.textContent = m ? fmtPct(m.changePct) : "\u2013";
+      chg.dataset.dir = m ? (m.changePct >= 0 ? "up" : "down") : "";
+      if (!r) {
+        read.textContent = "\u2013";
+        read.dataset.tone = "flat";
+        li.removeAttribute("data-tip");
+      } else {
+        read.textContent = r.ready ? r.action : "n/a";
+        read.dataset.tone = r.action === "Long" ? "up" : r.action === "Short" ? "down" : "flat";
+        li.dataset.tip = r.ready
+          ? `1h Market Cipher B: ${r.bias}, score ${signed(r.score)}, wave ${fmtNum(r.fast, 1)} (${r.zone.label.toLowerCase()}).`
+          : "Not enough 1h history yet.";
+      }
+    }
+  }
+
+  function refreshWatchPrices() {
+    if (watchBusy || !state.watch.length) return;
+    watchBusy = true;
+    PulseFeed.fetchTickers(state.watch.map((id) => IN.get(id)))
+      .then((t) => {
+        for (const id in t) renderPairTab(id, t[id]);
+        renderWatch();
+      })
+      .catch((e) => console.warn("[watch]", e))
+      .finally(() => (watchBusy = false));
+  }
+
+  function refreshWatchReads(ids) {
+    for (const id of ids || state.watch) {
+      PulseFeed.fetchRecentKlines(IN.get(id), "1h", 300)
+        .then((bars) => {
+          watchReads[id] = V.readTimeframe(I.marketCipherB(bars, state.mcb));
+          renderWatch();
+        })
+        .catch((e) => console.warn("[watch 1h]", id, e));
+    }
+  }
+
+  function syncWatchPolling() {
+    clearInterval(watchPriceTimer);
+    clearInterval(watchReadTimer);
+    watchPriceTimer = watchReadTimer = 0;
+    if (!watchVisible()) return;
+    renderWatch();
+    refreshWatchPrices();
+    refreshWatchReads();
+    watchPriceTimer = setInterval(() => !document.hidden && refreshWatchPrices(), 5000);
+    watchReadTimer = setInterval(() => !document.hidden && refreshWatchReads(), 60000);
+  }
+
+  $("watchList").addEventListener("click", (e) => {
+    const row = e.target.closest(".watch-row");
+    if (!row) return;
+    if (e.target.closest(".watch-remove")) toggleWatch(row.dataset.id, false);
+    else switchPair(row.dataset.id);
+  });
+  $("starBtn").addEventListener("click", () => toggleWatch(state.pair));
+  $("watchAdd").addEventListener("click", () => openPalette("watch"));
 
   function setPanelTab(tab) {
     state.panel = tab;
@@ -1483,6 +1634,7 @@
       state.panel = view;
       renderPanel();
     }
+    syncWatchPolling();
   }
   document.querySelectorAll(".mobile-nav [data-view]").forEach((b) => b.addEventListener("click", () => setMobileView(b.dataset.view)));
   $("app").dataset.mobileView = "chart";
@@ -1722,6 +1874,22 @@
     out.push({ group: "View", label: "Jump to latest bar", keys: "live realtime latest", run: () => chartView.scrollToRealtime() });
     out.push({ group: "View", label: "Show order book", keys: "book depth orderbook panel", run: () => (isMobile() ? setMobileView("book") : setPanelTab("book")) });
     out.push({ group: "View", label: "Show Pulse verdict and signals", keys: "signal verdict insights ai buy sell long short", run: () => (isMobile() ? setMobileView("signal") : setPanelTab("signal")) });
+    for (const it of IN.LIST) {
+      const on = inWatch(it.id);
+      out.push({
+        group: "Watchlist",
+        label: `${on ? "Remove" : "Add"} ${it.id} ${on ? "from" : "to"} watchlist`,
+        hint: it.name,
+        icon: it.icon,
+        keys: `watch watchlist star ${it.id} ${it.name} ${it.kind}`,
+        active: on,
+        run: () => {
+          toggleWatch(it.id);
+          if (!isMobile()) setPanelTab("watch");
+        },
+      });
+    }
+    out.push({ group: "View", label: "Show watchlist", keys: "watchlist watch favorites star", run: () => (isMobile() ? setMobileView("watch") : setPanelTab("watch")) });
     out.push({ group: "View", label: "Show market: sentiment, news, fundamentals", keys: "market news sentiment fear greed fundamentals", run: () => (isMobile() ? setMobileView("market") : setPanelTab("market")) });
     if (!isMobile()) out.push({ group: "View", label: state.panelOpen ? "Hide panel" : "Show panel", keys: "panel sidebar", run: () => $("panelBtn").click() });
     out.push({ group: "View", label: "About and data sources", keys: "about credits tradingview data sources license", run: () => toggleAbout(true) });
@@ -1825,6 +1993,10 @@
       else openPalette();
       return;
     }
+    if ((e.key === "w" || e.key === "W") && !typing && !palette.open && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      toggleWatch(state.pair);
+      return;
+    }
     if (e.key === "/" && !typing && !palette.open) {
       e.preventDefault();
       openPalette();
@@ -1850,6 +2022,7 @@
     pollTickers(true);
     document.addEventListener("visibilitychange", () => !document.hidden && pollTickers(true));
     renderSymbol();
+    renderStar();
     renderTimeframes();
     renderChartTypes();
     renderPanel();

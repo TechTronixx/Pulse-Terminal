@@ -43,6 +43,10 @@ Satoshi (self-hosted, 400 / 500 / 700) for all interface text. Chivo Mono (self-
 - **Timeframes**: one row per timeframe, 1m to 1y. Columns: name (chart timeframe marked with a copper dot), a wave meter (-100 to 100, oversold / overbought ends shaded, marker colored by zone), the last dot glyph with bars ago, and a Long / Short / Wait tag. Full reasons live in the row tooltip. A key under the list explains the dots.
 - **Market**: Fear & Greed value, scale and 7-day bars; headline list with source, age and a tone tag; fundamentals grid.
 
+## Watchlist
+
+Rows of icon, symbol and name, price (flashes copper or red on change), 24h change, and the 1h Market Cipher B read tag, with a remove control that shows on hover. The open market gets a copper inset bar. The star next to the symbol box toggles membership (amber when on).
+
 ## Help and tooltips
 
 Any element with `data-tip` gets a tooltip (dark pill, 450ms delay, instant for the next one, keyboard focus supported, off for touch). Indicators carry a `?` that expands a plain explanation inline; Market Cipher B's settings open with a "How it works" guide. The TradingView attribution and data credits live in the About popover (`i` in the status bar, also in the palette).
