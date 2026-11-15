@@ -694,6 +694,11 @@
       setSecondsVisible(v) {
         chart.applyOptions({ timeScale: { secondsVisible: v } });
       },
+      // daily and longer candles show dates only; intraday shows the time too
+      setTimeframe(tf) {
+        const intraday = !["1d", "1w", "1M"].includes(tf);
+        chart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: tf === "1s" } });
+      },
       setIndicators(ind) {
         buildOverlays(ind);
         if (ind.mcb) addMcb();

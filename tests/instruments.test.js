@@ -36,3 +36,13 @@ test("news matching for stocks and commodities", () => {
   assert.equal(N.mentions("CL", "OPEC+ agrees to cut output"), true);
   assert.equal(N.mentions("COPPER", "Gold and silver rally"), false);
 });
+
+test("candle buckets match Binance boundaries (weeks start Monday, months on the 1st)", () => {
+  const F = require("../js/feed.js");
+  const t = Date.UTC(2026, 10, 15, 9, 30, 12); // Sunday 2026-11-15 09:30:12 UTC
+  assert.equal(F.bucketStart(t, "1h"), Date.UTC(2026, 10, 15, 9) / 1000);
+  assert.equal(F.bucketStart(t, "4h"), Date.UTC(2026, 10, 15, 8) / 1000);
+  assert.equal(F.bucketStart(t, "1d"), Date.UTC(2026, 10, 15) / 1000);
+  assert.equal(F.bucketStart(t, "1w"), Date.UTC(2026, 10, 9) / 1000); // Monday 9 Nov
+  assert.equal(F.bucketStart(t, "1M"), Date.UTC(2026, 10, 1) / 1000);
+});

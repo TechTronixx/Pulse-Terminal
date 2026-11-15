@@ -7,7 +7,9 @@
   const IN = window.PulseInstruments;
   const PAIRS = IN.LIST.map((i) => i.id);
   const inst = () => IN.get(state.pair);
-  const TIMEFRAMES = ["1s", "1m", "3m", "5m", "15m", "30m"];
+  const TIMEFRAMES = ["1s", "1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M"];
+  const TF_LABEL = { "1d": "1D", "1w": "1W", "1M": "1M" };
+  const TF_NAME = { "1s": "1 second", "1m": "1 minute", "3m": "3 minutes", "5m": "5 minutes", "15m": "15 minutes", "30m": "30 minutes", "1h": "1 hour", "4h": "4 hours", "1d": "1 day", "1w": "1 week", "1M": "1 month" };
   const CHART_TYPES = { candlestick: "Candles", heikinAshi: "Heikin Ashi", line: "Line" };
   const INDICATORS = [
     { key: "vol", name: "Volume", desc: "Bars at the bottom of the price pane: how much traded in each candle. Copper = candle closed up, grey = closed down." },
@@ -328,7 +330,7 @@
     // futures have no 1s candles
     if (!PulseFeed.supports(inst().venue, state.tf)) {
       state.tf = "1m";
-      chartView.setSecondsVisible(false);
+      chartView.setTimeframe("1m");
     }
     save();
     renderGroups();
@@ -348,7 +350,7 @@
     state.tf = tf;
     save();
     renderTimeframes();
-    chartView.setSecondsVisible(tf === "1s");
+    chartView.setTimeframe(tf);
     startFeed();
   }
 
@@ -482,7 +484,8 @@
         b.type = "button";
         b.setAttribute("role", "radio");
         b.dataset.tf = tf;
-        b.textContent = tf;
+        b.textContent = TF_LABEL[tf] || tf;
+        b.setAttribute("aria-label", TF_NAME[tf]);
         b.addEventListener("click", () => switchTimeframe(tf));
         seg.appendChild(b);
       }
@@ -492,7 +495,7 @@
       const ok = PulseFeed.supports(venue, b.dataset.tf);
       b.disabled = !ok;
       if (!ok) b.dataset.tip = "1s candles are only available for crypto spot";
-      else delete b.dataset.tip;
+      else b.dataset.tip = TF_NAME[b.dataset.tf] + " candles";
       b.setAttribute("aria-checked", String(b.dataset.tf === state.tf));
     }
     renderLegendMeta();
@@ -1846,7 +1849,7 @@
         });
       }
     }
-    for (const tf of TIMEFRAMES.filter((t) => PulseFeed.supports(inst().venue, t))) out.push({ group: "Timeframe", label: `Timeframe ${tf}`, keys: `tf interval ${tf}`, active: tf === state.tf, run: () => switchTimeframe(tf) });
+    for (const tf of TIMEFRAMES.filter((t) => PulseFeed.supports(inst().venue, t))) out.push({ group: "Timeframe", label: `Timeframe ${TF_LABEL[tf] || tf}  (${TF_NAME[tf]})`, keys: `tf interval ${tf} ${TF_NAME[tf]}`, active: tf === state.tf, run: () => switchTimeframe(tf) });
     for (const t in CHART_TYPES) out.push({ group: "Chart type", label: CHART_TYPES[t], keys: `chart type ${t}`, active: t === state.chartType, run: () => switchChartType(t) });
     for (const ind of INDICATORS) {
       out.push({
@@ -2027,7 +2030,7 @@
     renderChartTypes();
     renderPanel();
     applyTheme(state.theme);
-    chartView.setSecondsVisible(state.tf === "1s");
+    chartView.setTimeframe(state.tf);
     chartView.setChartType(state.chartType, model);
     recreateVpvr();
     applyIndicators();

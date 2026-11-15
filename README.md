@@ -33,7 +33,7 @@ A fast, single-view terminal for crypto, US stocks and commodities in real time,
 - **Insights** — Chart-timeframe indicator summary, order-book pressure, activity, MACD momentum, and Bollinger volatility.
 - **Watchlist** — Star any market (or press `W`) and follow crypto, stocks and commodities side by side: live price, 24h change and the 1h Market Cipher B read (Long / Short / Wait). Click a row to open it.
 - **Built-in help** — ? explanations for every indicator, a Market Cipher B guide in its settings, and tooltips across the UI.
-- **Fast timeframes** — 1s, 1m, 3m, 5m, 15m, and 30m, with 1,000 bars of history.
+- **Timeframes** — 1s (crypto only), 1m, 3m, 5m, 15m, 30m, 1h, 4h, 1D, 1W and 1M, with up to 1,000 bars of history.
 - **Keyboard first** — `Ctrl K` / `⌘K` or `/` opens a command palette for pairs, timeframes, indicators, and views.
 - **Smooth navigation** — Trackpad scroll and pinch move the chart directly, mouse-wheel notches ease in, the price axis rescales smoothly instead of jumping, and drag keeps kinetic momentum. Indicator panes resize by dragging their divider; the right panel resizes by dragging its left edge or with the wide-panel button, which puts the verdict and timeframes side by side.
 

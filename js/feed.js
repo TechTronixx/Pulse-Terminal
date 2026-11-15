@@ -39,7 +39,24 @@
     "5m": 300000,
     "15m": 900000,
     "30m": 1800000,
+    "1h": 3600000,
+    "4h": 14400000,
+    "1d": 86400000,
+    "1w": 604800000,
   };
+  const DAY = 86400000;
+  const MONDAY_OFFSET = 4 * DAY; // 1970-01-05 was a Monday; Binance weeks start Monday 00:00 UTC
+
+  // Start (unix seconds) of the candle that contains trade time ms.
+  function bucketStart(ms, tf) {
+    if (tf === "1M") {
+      const d = new Date(ms);
+      return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
+    }
+    if (tf === "1w") return (Math.floor((ms - MONDAY_OFFSET) / INTERVAL_MS["1w"]) * INTERVAL_MS["1w"] + MONDAY_OFFSET) / 1000;
+    const step = INTERVAL_MS[tf];
+    return (Math.floor(ms / step) * step) / 1000;
+  }
   const MAX_BARS = 2000;
   const TRIM_TO = 1500;
   const MAX_RETRY_DELAY = 30000;
@@ -235,8 +252,7 @@
     }
 
     function bucketOf(ms) {
-      const step = INTERVAL_MS[interval];
-      return Math.floor(ms / step) * (step / 1000);
+      return bucketStart(ms, interval);
     }
 
     function applyTrade(t) {
@@ -503,5 +519,6 @@
     };
   }
 
-  global.PulseFeed = { create, fetchSymbolInfo, fetchTickers, fetchKlines, fetchRecentKlines, supports, VENUES, INTERVAL_MS };
+  if (typeof module !== "undefined" && module.exports) module.exports = { bucketStart, supports, INTERVAL_MS };
+  global.PulseFeed = { create, fetchSymbolInfo, fetchTickers, fetchKlines, fetchRecentKlines, supports, bucketStart, VENUES, INTERVAL_MS };
 })(typeof window !== "undefined" ? window : globalThis);
